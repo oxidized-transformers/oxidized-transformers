@@ -1,4 +1,5 @@
 use candle_core::error::Error;
+use candle_core::Module;
 use candle_core::Tensor;
 use candle_nn::ops::softmax;
 use candle_nn::{linear, Linear, VarBuilder};
