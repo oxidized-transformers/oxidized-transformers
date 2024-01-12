@@ -16,6 +16,15 @@ pub struct AttentionMask {
     bool_mask: Tensor,
 }
 
+impl AttentionMask {
+    pub fn apply_logit_mask(&self, input: &Tensor) -> Result<Tensor> {
+        // Underflows to -inf for more narrow floating point types, which
+        // is ok for masking.
+        let blocked_value = Tensor::try_from(f32::MIN)?;
+        Ok(self.bool_mask.where_cond(input, &blocked_value)?)
+    }
+}
+
 #[non_exhaustive]
 pub enum QkvSplit {
     Default,
@@ -29,13 +38,13 @@ pub enum QkvMode {
     MergedSplitAfter(QkvSplit),
 }
 
-pub struct ScaledDotProducAttention {
+pub struct ScaledDotProductAttention {
     // TODO: dropout, linear biases
 }
 
-impl ScaledDotProducAttention {
+impl ScaledDotProductAttention {
     pub fn new(_dropout: f64) -> Self {
-        ScaledDotProducAttention {}
+        ScaledDotProductAttention {}
     }
 
     pub fn forward(
@@ -45,8 +54,11 @@ impl ScaledDotProducAttention {
         value: &Tensor,
         attention_mask: &AttentionMask,
     ) -> Result<Tensor> {
+        // TODO: add code path for flash attention, but verify the attention
+        //       layer is working first...
         let model_width = key.dim(3)?;
-        let attn_scores = query.matmul(&key.transpose(3, 2)?)?;
+        let mut attn_scores = query.matmul(&key.transpose(3, 2)?)?;
+        attn_scores = attention_mask.apply_logit_mask(&attn_scores)?;
         let temperature = (model_width as f64).sqrt();
         let attn_scores = (attn_scores / temperature)?;
         let attn_weights = softmax(&attn_scores, 3)?;
@@ -65,7 +77,7 @@ pub enum QkvTensors {
 
 pub struct SelfAttention {
     // TODO: dropout prob
-    attention: ScaledDotProducAttention,
+    attention: ScaledDotProductAttention,
     attention_heads: AttentionHeads,
     head_width: usize,
     output: Linear,
@@ -100,7 +112,7 @@ impl SelfAttention {
         };
 
         Ok(Self {
-            attention: ScaledDotProducAttention::new(dropout),
+            attention: ScaledDotProductAttention::new(dropout),
             attention_heads,
             head_width,
             output,
