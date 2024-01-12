@@ -1,7 +1,8 @@
-use candle_core::Module;
 use candle_core::Tensor;
+use candle_core::{IndexOp, Module};
 use candle_nn::ops::softmax;
 use candle_nn::{linear, Linear, VarBuilder};
+use std::borrow::Cow;
 
 use crate::error::Result;
 use crate::layers::QueryKeyRotaryEmbeddings;
@@ -12,16 +13,29 @@ pub struct AttentionHeads {
     qkv_mode: QkvMode,
 }
 
+/// Attention mask.
+///
+/// Sequence elements for which the corresponding mask element is set to
+/// ``False`` are ignored during attention calculation.
+#[derive(Clone, Debug)]
 pub struct AttentionMask {
     bool_mask: Tensor,
 }
 
 impl AttentionMask {
+    /// Use the attention mask to mask attention logits.
     pub fn apply_logit_mask(&self, input: &Tensor) -> Result<Tensor> {
         // Underflows to -inf for more narrow floating point types, which
         // is ok for masking.
         let blocked_value = Tensor::try_from(f32::MIN)?;
         Ok(self.bool_mask.where_cond(input, &blocked_value)?)
+    }
+
+    /// Merge this attention mask with another attention mask.
+    pub fn merge_mask(&self, other: &AttentionMask) -> Result<AttentionMask> {
+        Ok(AttentionMask {
+            bool_mask: (&self.bool_mask * &other.bool_mask)?,
+        })
     }
 }
 
@@ -123,7 +137,7 @@ impl SelfAttention {
         &self,
         input: &Tensor,
         attention_mask: &AttentionMask,
-        _use_causal_mask: bool,
+        use_causal_mask: bool,
     ) -> Result<Tensor> {
         let (mut query, mut key, value) = match &self.qkv {
             QkvTensors::Separate { query, key, value } => {
@@ -155,13 +169,34 @@ impl SelfAttention {
 
         // TODO: ALiBi
 
+        let combined_mask = if use_causal_mask {
+            let causal_mask = create_causal_mask(&query, &key)?;
+            Cow::Owned(attention_mask.merge_mask(&causal_mask)?)
+        } else {
+            Cow::Borrowed(attention_mask)
+        };
+
         let attn = self
             .attention
-            .forward(&query, &key, &value, attention_mask)?
+            .forward(&query, &key, &value, &combined_mask)?
             .combine_heads()?;
 
         Ok(self.output.forward(&attn)?)
     }
+}
+
+/// Create a causal mask.
+///
+/// A causal mask ensures that tokens cannot attend to succeeding tokens.
+fn create_causal_mask(query: &Tensor, key: &Tensor) -> Result<AttentionMask> {
+    let (_, _, query_len, _) = query.shape().dims4()?;
+    let (_, _, key_len, _) = key.shape().dims4()?;
+
+    let causal_mask =
+        Tensor::tril2(key_len, key.dtype(), key.device())?.reshape((1, 1, key_len, key_len))?;
+    Ok(AttentionMask {
+        bool_mask: causal_mask.i((.., .., key_len - query_len..key_len, ..key_len))?,
+    })
 }
 
 trait CombineHeads {
