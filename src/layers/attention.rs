@@ -62,7 +62,7 @@ impl ScaledDotProductAttention {
         let temperature = (model_width as f64).sqrt();
         let attn_scores = (attn_scores / temperature)?;
         let attn_weights = softmax(&attn_scores, 3)?;
-        Ok(attn_weights.matmul(&value)?)
+        Ok(attn_weights.matmul(value)?)
     }
 }
 
@@ -79,7 +79,6 @@ pub struct SelfAttention {
     // TODO: dropout prob
     attention: ScaledDotProductAttention,
     attention_heads: AttentionHeads,
-    head_width: usize,
     output: Linear,
     qkv: QkvTensors,
     rotary_embeds: Option<QueryKeyRotaryEmbeddings>,
@@ -114,7 +113,6 @@ impl SelfAttention {
         Ok(Self {
             attention: ScaledDotProductAttention::new(dropout),
             attention_heads,
-            head_width,
             output,
             qkv,
             rotary_embeds,

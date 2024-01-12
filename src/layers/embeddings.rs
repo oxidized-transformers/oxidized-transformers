@@ -70,7 +70,7 @@ impl RotaryEmbeddings {
         let device = theta.device();
 
         // mΘ
-        let position = Tensor::arange(0.0, length as f32, &device)?.unsqueeze(1)?;
+        let position = Tensor::arange(0.0, length as f32, device)?.unsqueeze(1)?;
         let m_theta = position.broadcast_mul(&theta.unsqueeze(0)?)?;
 
         // We apply both sin and cos twice (see Eq 15, 34), but the ordering
@@ -238,8 +238,7 @@ impl QueryKeyRotaryEmbeddings {
         // If a cache was provided, but no positions, assume that the
         // positions of the current batch continue from the cache.
         if let (Some(cache), None) = (cache, &positions) {
-            let (_, cache_len, _, _) = query.shape().dims4()?;
-            let cache_len = cache.key.shape().dims()[2];
+            let (_, cache_len, _, _) = cache.key.shape().dims4()?;
             positions = Some(
                 Tensor::arange(
                     cache_len as i64,
@@ -278,7 +277,8 @@ impl QueryKeyRotaryEmbeddings {
 }
 
 pub struct KeyValueCache {
-    key: Tensor,
+    pub key: Tensor,
+    pub value: Tensor,
 }
 
 #[cfg(test)]
