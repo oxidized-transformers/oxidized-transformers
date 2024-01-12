@@ -1,8 +1,10 @@
-use candle_core::error::Error;
 use candle_core::Module;
 use candle_core::Tensor;
 use candle_nn::ops::softmax;
 use candle_nn::{linear, Linear, VarBuilder};
+
+use crate::error::Result;
+use crate::layers::QueryKeyRotaryEmbeddings;
 
 pub struct AttentionHeads {
     n_query_heads: usize,
@@ -42,13 +44,13 @@ impl ScaledDotProducAttention {
         key: &Tensor,
         value: &Tensor,
         attention_mask: &AttentionMask,
-    ) -> Result<Tensor, Error> {
+    ) -> Result<Tensor> {
         let model_width = key.dim(3)?;
         let attn_scores = query.matmul(&key.transpose(3, 2)?)?;
         let temperature = (model_width as f64).sqrt();
         let attn_scores = (attn_scores / temperature)?;
         let attn_weights = softmax(&attn_scores, 3)?;
-        attn_weights.matmul(&value)
+        Ok(attn_weights.matmul(&value)?)
     }
 }
 
@@ -68,6 +70,7 @@ pub struct SelfAttention {
     head_width: usize,
     output: Linear,
     qkv: QkvTensors,
+    rotary_embeds: Option<QueryKeyRotaryEmbeddings>,
 }
 
 impl SelfAttention {
@@ -76,8 +79,9 @@ impl SelfAttention {
         attention_heads: AttentionHeads,
         dropout: f64,
         hidden_width: usize,
+        rotary_embeds: Option<QueryKeyRotaryEmbeddings>,
         _use_bias: bool,
-    ) -> Result<Self, Error> {
+    ) -> Result<Self> {
         // TODO: use_bias
         let head_width = hidden_width / attention_heads.n_key_value_heads;
         let key_value_width = attention_heads.n_key_value_heads * head_width;
@@ -101,6 +105,7 @@ impl SelfAttention {
             head_width,
             output,
             qkv,
+            rotary_embeds,
         })
     }
 
@@ -109,8 +114,8 @@ impl SelfAttention {
         input: &Tensor,
         attention_mask: &AttentionMask,
         _use_causal_mask: bool,
-    ) -> Result<Tensor, Error> {
-        let (query, key, value) = match &self.qkv {
+    ) -> Result<Tensor> {
+        let (mut query, mut key, value) = match &self.qkv {
             QkvTensors::Separate { query, key, value } => {
                 let query = query
                     .forward(input)?
@@ -126,6 +131,12 @@ impl SelfAttention {
             _ => unimplemented!(),
         };
 
+        if let Some(rotaty_embeds) = &self.rotary_embeds {
+            let (query_rot, key_rot) = rotaty_embeds.forward(&query, &key, None, None)?;
+            query = query_rot;
+            key = key_rot;
+        }
+
         // TODO: rotary embeds
 
         // TODO: kv cache
@@ -139,31 +150,33 @@ impl SelfAttention {
             .forward(&query, &key, &value, attention_mask)?
             .combine_heads()?;
 
-        self.output.forward(&attn)
+        Ok(self.output.forward(&attn)?)
     }
 }
 
 trait CombineHeads {
-    fn combine_heads(&self) -> Result<Tensor, Error>;
+    fn combine_heads(&self) -> Result<Tensor>;
 }
 
 impl CombineHeads for Tensor {
-    fn combine_heads(&self) -> Result<Tensor, Error> {
+    fn combine_heads(&self) -> Result<Tensor> {
         let (batch_size, n_heads, seq_len, model_width) = self.dims4()?;
-        self.transpose(1, 2)?
-            .reshape((batch_size, seq_len, n_heads * model_width))
+        Ok(self
+            .transpose(1, 2)?
+            .reshape((batch_size, seq_len, n_heads * model_width))?)
     }
 }
 
 trait SplitHeads {
-    fn split_heads(&self, n_heads: usize) -> Result<Tensor, Error>;
+    fn split_heads(&self, n_heads: usize) -> Result<Tensor>;
 }
 
 impl SplitHeads for Tensor {
-    fn split_heads(&self, n_heads: usize) -> Result<Tensor, Error> {
+    fn split_heads(&self, n_heads: usize) -> Result<Tensor> {
         let (batch_size, seq_len, model_width) = self.dims3()?;
         let head_width = model_width / n_heads;
-        self.reshape((batch_size, seq_len, n_heads, head_width))?
-            .transpose(1, 2)
+        Ok(self
+            .reshape((batch_size, seq_len, n_heads, head_width))?
+            .transpose(1, 2)?)
     }
 }
