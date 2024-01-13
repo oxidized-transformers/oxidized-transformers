@@ -155,13 +155,11 @@ impl SelfAttention {
             _ => unimplemented!(),
         };
 
-        if let Some(rotaty_embeds) = &self.rotary_embeds {
-            let (query_rot, key_rot) = rotaty_embeds.forward(&query, &key, None, None)?;
+        if let Some(rotary_embeds) = &self.rotary_embeds {
+            let (query_rot, key_rot) = rotary_embeds.forward(&query, &key, None, None)?;
             query = query_rot;
             key = key_rot;
         }
-
-        // TODO: rotary embeds
 
         // TODO: kv cache
 
