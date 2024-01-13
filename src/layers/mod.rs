@@ -1,11 +1,13 @@
 mod attention;
-
-mod embeddings;
-
-pub mod feedforward;
-
-pub use embeddings::{QueryKeyRotaryEmbeddings, RotaryEmbeddings};
-
 pub use attention::{
     AttentionHeads, AttentionMask, QkvMode, QkvSplit, ScaledDotProductAttention, SelfAttention,
 };
+
+mod embeddings;
+pub use embeddings::{QueryKeyRotaryEmbeddings, RotaryEmbeddings};
+
+pub mod feedforward;
+
+mod identity;
+
+pub mod transformer;
