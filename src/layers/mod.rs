@@ -11,3 +11,5 @@ pub mod feedforward;
 mod identity;
 
 pub mod transformer;
+
+pub mod normalization;
