@@ -11,4 +11,4 @@ homepage = "https://github.com/danieldk/oxidized-transformers"
 [dependencies]
 candle-core = "0.3"
 candle-nn = "0.3"
-thiserror = "1"
+snafu = "0.8"
