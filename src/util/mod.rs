@@ -1,3 +1,5 @@
+pub mod renaming_backend;
+
 #[cfg(test)]
 pub(crate) mod tests {
     use candle_core::Tensor;
