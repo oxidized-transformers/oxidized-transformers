@@ -1,10 +1,9 @@
-use std::error::Error;
-
 use candle_core::Tensor;
 use candle_nn::ops::softmax;
 use candle_nn::Dropout;
 use snafu::{ResultExt, Snafu};
 
+use crate::error::BoxedError;
 use crate::layers::attention::{
     AttentionLinearBiases, AttentionLinearBiasesError, AttentionMask, AttentionMaskError,
     AttentionScorer,
@@ -58,7 +57,7 @@ impl AttentionScorer for ScaledDotProductAttention {
         value: &Tensor,
         attention_mask: &AttentionMask,
         train: bool,
-    ) -> Result<Tensor, Box<dyn Error + Send + Sync>> {
+    ) -> Result<Tensor, BoxedError> {
         // TODO: add code path for flash attention, but verify the attention
         //       layer is working first...
 

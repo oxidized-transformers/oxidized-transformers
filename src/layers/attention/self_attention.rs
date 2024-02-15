@@ -1,10 +1,10 @@
 use std::borrow::Cow;
-use std::error::Error;
 
 use candle_core::{IndexOp, Module, ModuleT, Tensor};
 use candle_nn::{linear, Dropout, Linear, VarBuilder};
 use snafu::{ResultExt, Snafu};
 
+use crate::error::BoxedError;
 use crate::layers::attention::{
     AttentionMask, AttentionMaskError, AttentionScorer, ScaledDotProductAttentionError,
 };
@@ -52,9 +52,7 @@ pub enum QkvTensors {
 #[derive(Debug, Snafu)]
 pub enum SelfAttentionError {
     #[snafu(display("Cannot apply attention scorer"))]
-    AttentionScorer {
-        source: Box<dyn Error + Send + Sync>,
-    },
+    AttentionScorer { source: BoxedError },
 
     #[snafu(display("Cannot create causal mask"))]
     CausalMask { source: candle_core::Error },
