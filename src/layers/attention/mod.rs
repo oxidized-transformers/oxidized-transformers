@@ -1,5 +1,3 @@
-use std::error::Error;
-
 use candle_core::Tensor;
 
 mod mask;
@@ -13,6 +11,8 @@ pub use alibi::{AttentionLinearBiases, AttentionLinearBiasesError};
 
 mod self_attention;
 pub use self_attention::{QkvMode, SelfAttention, SelfAttentionError};
+
+use crate::error::BoxedError;
 
 /// Trait implemented by modules that perform attention scoring.
 pub trait AttentionScorer {
@@ -39,5 +39,5 @@ pub trait AttentionScorer {
         value: &Tensor,
         attention_mask: &AttentionMask,
         train: bool,
-    ) -> Result<Tensor, Box<dyn Error + Send + Sync>>;
+    ) -> Result<Tensor, BoxedError>;
 }
