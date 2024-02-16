@@ -1,13 +1,63 @@
-use candle_core::Tensor;
+use candle_core::{ModuleT, Tensor};
 use candle_nn::ops::softmax;
-use candle_nn::Dropout;
+use candle_nn::VarBuilder;
 use snafu::{ResultExt, Snafu};
 
 use crate::error::BoxedError;
 use crate::layers::attention::{
-    AttentionLinearBiases, AttentionLinearBiasesError, AttentionMask, AttentionMaskError,
-    AttentionScorer,
+    AttentionLinearBiases, AttentionLinearBiasesConfig, AttentionLinearBiasesError, AttentionMask,
+    AttentionMaskError, AttentionScorer, BuildAttentionScorer,
 };
+use crate::layers::build_module::BuildModule;
+use crate::layers::identity::Identity;
+
+/// Configuration for scaled dot-product attention.
+#[derive(Debug)]
+pub struct ScaledDotProductAttentionConfig {
+    dropout: Box<dyn BuildModule>,
+    linear_biases: Option<AttentionLinearBiasesConfig>,
+}
+
+impl ScaledDotProductAttentionConfig {
+    /// Dropout to apply after attention.
+    ///
+    /// Default: `Identity`.
+    pub fn dropout(mut self, dropout: Box<dyn BuildModule>) -> Self {
+        self.dropout = dropout;
+        self
+    }
+
+    /// ALiBi for attention scores.
+    ///
+    /// Default: `None`.
+    pub fn linear_biases(mut self, linear_biases: Option<AttentionLinearBiasesConfig>) -> Self {
+        self.linear_biases = linear_biases;
+        self
+    }
+}
+
+impl Default for ScaledDotProductAttentionConfig {
+    fn default() -> Self {
+        Self {
+            dropout: Box::new(Identity),
+            linear_biases: None,
+        }
+    }
+}
+
+impl BuildAttentionScorer for ScaledDotProductAttentionConfig {
+    fn build(&self, vb: VarBuilder) -> Result<Box<dyn AttentionScorer>, BoxedError> {
+        Ok(Box::new(ScaledDotProductAttention {
+            dropout: self.dropout.build(vb.clone()).context(BuildDropoutSnafu)?,
+            linear_biases: self
+                .linear_biases
+                .as_ref()
+                .map(|linear_biases| linear_biases.build())
+                .transpose()
+                .context(BuildAttentionLinearBiasesSnafu)?,
+        }))
+    }
+}
 
 /// Errors for scaled dot-product attention.
 #[derive(Debug, Snafu)]
@@ -24,6 +74,12 @@ pub enum ScaledDotProductAttentionError {
     #[snafu(display("Cannot weigh representations using attention mask"))]
     AttentionWeight { source: candle_core::Error },
 
+    #[snafu(display("Cannot build attention linear biases"))]
+    BuildAttentionLinearBiases { source: AttentionLinearBiasesError },
+
+    #[snafu(display("Cannot build dropout module"))]
+    BuildDropout { source: BoxedError },
+
     #[snafu(display("Cannot apply softmax temperature"))]
     Temperature { source: candle_core::Error },
 }
@@ -32,21 +88,8 @@ pub enum ScaledDotProductAttentionError {
 ///
 /// See [Vaswani et al., 2017](https://arxiv.org/abs/1706.03762).
 pub struct ScaledDotProductAttention {
-    dropout: Dropout,
+    dropout: Box<dyn ModuleT>,
     linear_biases: Option<AttentionLinearBiases>,
-}
-
-impl ScaledDotProductAttention {
-    /// Construct a scaled dot-product attention module.
-    ///
-    /// * dropout - Dropout to apply to the final hidden representation.
-    /// * linear_biases - ALiBi for attention scores. Not applied if `None`.
-    pub fn new(dropout: Dropout, linear_biases: Option<AttentionLinearBiases>) -> Self {
-        ScaledDotProductAttention {
-            dropout,
-            linear_biases,
-        }
-    }
 }
 
 impl AttentionScorer for ScaledDotProductAttention {
@@ -64,7 +107,7 @@ impl AttentionScorer for ScaledDotProductAttention {
         // Calculate attention scores.
         let mut attn_scores = key
             .transpose(3, 2)
-            .and_then(|xs| query.matmul(&xs))
+            .and_then(|xs| query.broadcast_matmul(&xs))
             .context(AttentionScoresSnafu)?;
 
         let model_width = key.dim(3).context(TemperatureSnafu)?;
@@ -85,8 +128,8 @@ impl AttentionScorer for ScaledDotProductAttention {
         // Apply attention weights.
         let attn_weights = softmax(&attn_scores, 3).context(AttentionWeightSnafu)?;
         attn_weights
-            .matmul(value)
-            .and_then(|xs| self.dropout.forward(&xs, train))
+            .broadcast_matmul(value)
+            .and_then(|xs| self.dropout.forward_t(&xs, train))
             .context(AttentionWeightSnafu)
             .boxed()
     }

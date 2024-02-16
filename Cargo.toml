@@ -9,4 +9,5 @@ homepage = "https://github.com/danieldk/oxidized-transformers"
 [dependencies]
 candle-core =  { git = "https://github.com/huggingface/candle.git", rev = "a90fc5c" }
 candle-nn = { git = "https://github.com/huggingface/candle.git", rev = "a90fc5c" }
+serde = "1"
 snafu = "0.8"
