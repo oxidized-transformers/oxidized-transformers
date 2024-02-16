@@ -1,7 +1,79 @@
 use std::sync::RwLock;
 
-use candle_core::{Device, IndexOp, Tensor};
+use candle_core::{IndexOp, Tensor};
+use candle_nn::VarBuilder;
 use snafu::{ensure, ResultExt, Snafu};
+
+/// Configuration for rotary embeddings.
+pub struct RotaryEmbeddingsConfig {
+    width: usize,
+    seq_len: usize,
+    base: usize,
+}
+
+impl RotaryEmbeddingsConfig {
+    /// Build a rotary embeddings module.
+    pub fn build(&self, vb: VarBuilder) -> Result<RotaryEmbeddings, RotaryEmbeddingsError> {
+        ensure!(self.width % 2 == 0, WidthNotEvenSnafu { width: self.width });
+
+        // Θ_i = 10000^(-2(i-1)/d)
+        let theta: Vec<_> = (0..self.width)
+            .step_by(2)
+            .map(|i| (self.base as f32).powf(-(i as f32 / self.width as f32)))
+            .collect();
+        let theta =
+            Tensor::from_vec(theta, (self.width / 2,), vb.device()).context(ThetaTensorSnafu)?;
+
+        let (cos, sin) = RotaryEmbeddings::create_rotary_embed(&theta, self.width, self.seq_len)
+            .context(CacheSnafu)?;
+
+        Ok(RotaryEmbeddings {
+            cache: RwLock::new(RotaryEmbeddingsCache { cos, sin }),
+            theta,
+        })
+    }
+
+    /// Width of the rotary embeddings.
+    ///
+    /// The width must be even.
+    ///
+    /// Default: `96`
+    pub fn width(mut self, width: usize) -> Self {
+        self.width = width;
+        self
+    }
+
+    /// Number of positions to precompute rotary embeddings for.
+    ///
+    /// The internal data structures will be resized if a longer sequence is
+    /// encountered.
+    ///
+    /// Default: `2048`
+    pub fn seq_len(mut self, seq_len: usize) -> Self {
+        self.seq_len = seq_len;
+        self
+    }
+
+    /// Base used for `theta`.
+    ///
+    /// This determines the cycle length of the embeddings.
+    ///
+    /// Default: `10_000`
+    pub fn base(mut self, base: usize) -> Self {
+        self.base = base;
+        self
+    }
+}
+
+impl Default for RotaryEmbeddingsConfig {
+    fn default() -> Self {
+        Self {
+            width: 96,
+            seq_len: 2048,
+            base: 10_000,
+        }
+    }
+}
 
 /// Errors for rotary embeddings.
 #[derive(Debug, Snafu)]
@@ -58,40 +130,6 @@ pub struct RotaryEmbeddings {
 }
 
 impl RotaryEmbeddings {
-    /// Construct a rotary embedding module.
-    ///
-    /// The rotary embedding will be precomputed for up to ``seq_len`` positions.
-    /// The embedding will be recomputed when a longer sequence is found in the
-    /// input.
-    ///
-    /// * `width` - Rotary embedding width. Must be even.
-    /// * `seq_len` - Number of positions to initially precompute.
-    /// * `base` - The base used for `theta` (normally 10_000). Determines the cycle
-    ///    length of the embeddings.
-    /// * `device` - Device on which the module is to be initialized.
-    pub fn new(
-        width: usize,
-        seq_len: usize,
-        base: usize,
-        device: &Device,
-    ) -> Result<Self, RotaryEmbeddingsError> {
-        ensure!(width % 2 == 0, WidthNotEvenSnafu { width });
-
-        // Θ_i = 10000^(-2(i-1)/d)
-        let theta: Vec<_> = (0..width)
-            .step_by(2)
-            .map(|i| (base as f32).powf(-(i as f32 / width as f32)))
-            .collect();
-        let theta = Tensor::from_vec(theta, (width / 2,), device).context(ThetaTensorSnafu)?;
-
-        let (cos, sin) = Self::create_rotary_embed(&theta, width, seq_len).context(CacheSnafu)?;
-
-        Ok(RotaryEmbeddings {
-            cache: RwLock::new(RotaryEmbeddingsCache { cos, sin }),
-            theta,
-        })
-    }
-
     fn create_rotary_embed(
         theta: &Tensor,
         width: usize,
@@ -204,8 +242,12 @@ impl RotaryEmbeddings {
             }
         };
 
-        let input_rot_cos = (rot_cos * input).context(ApplyEmbeddingsSnafu)?;
-        let input_rot_sin = (rot_sin * Self::rotate(input)?).context(ApplyEmbeddingsSnafu)?;
+        let input_rot_cos = input
+            .broadcast_mul(&rot_cos)
+            .context(ApplyEmbeddingsSnafu)?;
+        let input_rot_sin = Self::rotate(input)?
+            .broadcast_mul(&rot_sin)
+            .context(ApplyEmbeddingsSnafu)?;
 
         (input_rot_cos + input_rot_sin).context(ApplyEmbeddingsSnafu)
     }

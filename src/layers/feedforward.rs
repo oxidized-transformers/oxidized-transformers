@@ -1,7 +1,166 @@
-use candle_core::{Module, ModuleT, Tensor};
-use candle_nn::{linear, linear_no_bias, Dropout, Linear, VarBuilder};
-
 /// Feed-forward layers.
+use candle_core::{Module, ModuleT, Tensor};
+use candle_nn::{linear, linear_no_bias, Linear, VarBuilder};
+use snafu::{ResultExt, Snafu};
+
+use crate::error::BoxedError;
+use crate::layers::activation::Activation;
+use crate::layers::build_module::BuildModule;
+use crate::layers::identity::Identity;
+
+/// Configuration for pointwise feed-forward layers.
+#[derive(Debug)]
+pub struct PointwiseFeedForwardConfig {
+    activation: Box<dyn BuildModule>,
+    dropout: Box<dyn BuildModule>,
+    hidden_width: usize,
+    intermediate_width: usize,
+    layer_norm: Box<dyn BuildModule>,
+    use_bias: bool,
+    use_gate: bool,
+}
+
+impl PointwiseFeedForwardConfig {
+    /// Activation function.
+    ///
+    /// Default: `GELU`
+    pub fn activation(mut self, activation: Box<dyn BuildModule>) -> Self {
+        self.activation = activation;
+        self
+    }
+
+    /// Dropout to apply after the feed-forward layer.
+    ///
+    /// Default: `Identity`
+    pub fn dropout(mut self, dropout: Box<dyn BuildModule>) -> Self {
+        self.dropout = dropout;
+        self
+    }
+
+    /// Hidden width of the transformer.
+    ///
+    /// Default: `768`
+    pub fn hidden_width(mut self, hidden_width: usize) -> Self {
+        self.hidden_width = hidden_width;
+        self
+    }
+
+    /// Intermediate width in the feed-forward layer.
+    ///
+    /// Default: `3072`
+    pub fn intermediate_width(mut self, intermediate_width: usize) -> Self {
+        self.intermediate_width = intermediate_width;
+        self
+    }
+
+    /// Layer normalization module.
+    ///
+    /// Default: `Identity`
+    pub fn layer_norm(mut self, layer_norm: Box<dyn BuildModule>) -> Self {
+        self.layer_norm = layer_norm;
+        self
+    }
+
+    /// Use bias in linear layers.
+    ///
+    /// Default: `true`
+    pub fn use_bias(mut self, use_bias: bool) -> Self {
+        self.use_bias = use_bias;
+        self
+    }
+
+    /// Use Gated Linear Units.
+    ///
+    /// Default: `false`
+    pub fn use_gate(mut self, use_gate: bool) -> Self {
+        self.use_gate = use_gate;
+        self
+    }
+}
+
+impl Default for PointwiseFeedForwardConfig {
+    fn default() -> Self {
+        Self {
+            activation: Box::new(Activation::GELU),
+            dropout: Box::new(Identity),
+            hidden_width: 768,
+            intermediate_width: 3072,
+            layer_norm: Box::new(Identity),
+            use_bias: true,
+            use_gate: false,
+        }
+    }
+}
+
+impl BuildModule for PointwiseFeedForwardConfig {
+    fn build(&self, vb: VarBuilder) -> Result<Box<dyn ModuleT>, BoxedError> {
+        let linear_ctor = if self.use_bias {
+            linear
+        } else {
+            linear_no_bias
+        };
+
+        let intermediate = linear_ctor(
+            self.hidden_width,
+            self.intermediate_width,
+            vb.push_prefix("intermediate"),
+        )
+        .context(CreateLinearSnafu)?;
+
+        let gate = if self.use_gate {
+            Some(
+                linear_ctor(
+                    self.hidden_width,
+                    self.intermediate_width,
+                    vb.push_prefix("gate"),
+                )
+                .context(CreateLinearSnafu)?,
+            )
+        } else {
+            None
+        };
+
+        let output = linear_ctor(
+            self.intermediate_width,
+            self.hidden_width,
+            vb.push_prefix("output"),
+        )
+        .context(CreateLinearSnafu)?;
+
+        Ok(Box::new(PointwiseFeedForward {
+            activation: self
+                .activation
+                .build(vb.clone())
+                .context(BuildActivationSnafu)?,
+            dropout: self
+                .dropout
+                .build(vb.push_prefix("dropout"))
+                .context(BuildDropoutSnafu)?,
+            gate,
+            intermediate,
+            layer_norm: self
+                .layer_norm
+                .build(vb.push_prefix("layer_norm"))
+                .context(CreateLayerNormSnafu)?,
+            output,
+        }))
+    }
+}
+
+#[derive(Debug, Snafu)]
+pub enum PointwiseFeedForwardError {
+    #[snafu(display("Cannot build activation"))]
+    BuildActivation { source: BoxedError },
+
+    #[snafu(display("Cannot build dropout"))]
+    BuildDropout { source: BoxedError },
+
+    #[snafu(display("Cannot create layer norm"))]
+    CreateLayerNorm { source: BoxedError },
+
+    #[snafu(display("Cannot create linear layer"))]
+    CreateLinear { source: candle_core::Error },
+}
 
 /// Point-wise feed-forward layer (_Vaswani et al., 2017_).
 ///
@@ -27,65 +186,12 @@ use candle_nn::{linear, linear_no_bias, Dropout, Linear, VarBuilder};
 /// * _Dauphin et al., 2016_: https://arxiv.org/abs/1612.08083
 /// * _Shazeer, 2020_: https://arxiv.org/abs/2002.05202
 pub struct PointwiseFeedForward {
-    activation: Box<dyn Module>,
-    dropout: Dropout,
+    activation: Box<dyn ModuleT>,
+    dropout: Box<dyn ModuleT>,
     gate: Option<Linear>,
     intermediate: Linear,
     layer_norm: Box<dyn ModuleT>,
     output: Linear,
-}
-
-impl PointwiseFeedForward {
-    /// Construct a point-wise feed-forward layer.
-    ///
-    /// * `vb` - Variable store.
-    /// * `activation` - Non-linearity.
-    /// * `dropout` - Dropout applied to the output of the layer.
-    /// * `hidden_width` - Hidden width, dimensionality of the layer input and output.
-    /// * `intermediate_width` - Intermediate width inside the feed-forward layer.
-    /// * `layer_norm` - Layer normalization applied to the input.
-    /// * `use_bias` - Use bias in linear transformations.
-    /// * `use_gate` - Use Gated Linear Units.
-    #[allow(clippy::too_many_arguments)]
-    pub fn new(
-        vb: VarBuilder,
-        activation: Box<dyn Module>,
-        dropout: Dropout,
-        hidden_width: usize,
-        intermediate_width: usize,
-        layer_norm: Box<dyn ModuleT>,
-        use_bias: bool,
-        use_gate: bool,
-    ) -> Result<Self, candle_core::Error> {
-        let linear_ctor = if use_bias { linear } else { linear_no_bias };
-
-        let intermediate = linear_ctor(
-            hidden_width,
-            intermediate_width,
-            vb.push_prefix("intermediate"),
-        )?;
-
-        let gate = if use_gate {
-            Some(linear_ctor(
-                hidden_width,
-                intermediate_width,
-                vb.push_prefix("gate"),
-            )?)
-        } else {
-            None
-        };
-
-        let output = linear_ctor(intermediate_width, hidden_width, vb.push_prefix("output"))?;
-
-        Ok(Self {
-            activation,
-            dropout,
-            gate,
-            intermediate,
-            layer_norm,
-            output,
-        })
-    }
 }
 
 impl ModuleT for PointwiseFeedForward {
@@ -96,12 +202,14 @@ impl ModuleT for PointwiseFeedForward {
             Some(gate) => self.output.forward(
                 &self
                     .activation
-                    .forward(&gate.forward(&xs)?)?
+                    .forward_t(&gate.forward(&xs)?, train)?
                     .mul(&self.intermediate.forward(&xs)?)?,
             ),
-            None => self
-                .output
-                .forward(&self.activation.forward(&self.intermediate.forward(&xs)?)?),
+            None => self.output.forward(
+                &self
+                    .activation
+                    .forward_t(&self.intermediate.forward(&xs)?, train)?,
+            ),
         }?;
 
         self.dropout.forward_t(&output, train)

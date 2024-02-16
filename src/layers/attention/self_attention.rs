@@ -1,20 +1,26 @@
 use std::borrow::Cow;
 
-use candle_core::{IndexOp, Module, ModuleT, Tensor};
-use candle_nn::{linear, Dropout, Linear, VarBuilder};
+use candle_core::{DType, IndexOp, Module, ModuleT, Tensor};
+use candle_nn::{linear, linear_no_bias, Linear, VarBuilder};
 use snafu::{ResultExt, Snafu};
 
 use crate::error::BoxedError;
 use crate::layers::attention::{
-    AttentionMask, AttentionMaskError, AttentionScorer, ScaledDotProductAttentionError,
+    Attention, AttentionMask, AttentionMaskError, AttentionScorer, BuildAttention,
+    BuildAttentionScorer, ScaledDotProductAttentionConfig, ScaledDotProductAttentionError,
 };
-use crate::layers::embeddings::{QueryKeyRotaryEmbeddings, QueryKeyRotaryEmbeddingsError};
+use crate::layers::build_module::BuildModule;
+use crate::layers::embeddings::{
+    QueryKeyRotaryEmbeddings, QueryKeyRotaryEmbeddingsConfig, QueryKeyRotaryEmbeddingsError,
+};
+use crate::layers::identity::Identity;
 
 /// Attention heads configuration to use in self-attention.
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct AttentionHeads {
-    n_query_heads: usize,
-    n_key_value_heads: usize,
-    qkv_mode: QkvMode,
+    pub n_query_heads: usize,
+    pub n_key_value_heads: usize,
+    pub qkv_mode: QkvMode,
 }
 
 /// Query, key, value splitting strategies.
@@ -24,6 +30,7 @@ pub struct AttentionHeads {
 /// the sum of the number of query, key, and value heads. We need to split up
 /// the array into separate arrays for query, key, and value heads.
 #[non_exhaustive]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub enum QkvSplit {
     Default,
     KVSizedChunks,
@@ -32,6 +39,7 @@ pub enum QkvSplit {
 /// How the query, key and value projections are handled in
 /// the self-attention layer.
 #[non_exhaustive]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub enum QkvMode {
     Separate,
     MergedSplitBefore,
@@ -48,14 +56,247 @@ pub enum QkvTensors {
     },
 }
 
+/// Configuration for self-attention modules.
+#[derive(Debug)]
+pub struct SelfAttentionConfig {
+    /// Attention head configuration.
+    attention_heads: AttentionHeads,
+
+    /// Attention scorer.
+    attention_scorer: Box<dyn BuildAttentionScorer>,
+
+    /// Dropout probability to apply after attention.
+    dropout: Box<dyn BuildModule>,
+
+    /// Hidden width of the transformer.
+    hidden_width: usize,
+
+    /// Layer norm.
+    layer_norm: Box<dyn BuildModule>,
+
+    /// Number of query heads.
+    n_query_heads: usize,
+
+    /// Number of key and value heads.
+    n_key_value_heads: usize,
+
+    /// Rotary embedding configuration.
+    rotary_embeddings: Option<QueryKeyRotaryEmbeddingsConfig>,
+
+    /// Use ALiBi linear biases.
+    use_alibi: bool,
+
+    /// Use bias in linear layers.
+    use_bias: bool,
+
+    /// Use parallel attention.
+    use_parallel_attention: bool,
+}
+
+impl SelfAttentionConfig {
+    /// Attention head configuration.
+    pub fn attention_heads(mut self, attention_heads: AttentionHeads) -> Self {
+        self.attention_heads = attention_heads;
+        self
+    }
+
+    /// Attention scorer.
+    ///
+    /// Default: `ScaledDotProductAttentionConfig::default()`.
+    pub fn attention_scorer(mut self, attention_scorer: Box<dyn BuildAttentionScorer>) -> Self {
+        self.attention_scorer = attention_scorer;
+        self
+    }
+
+    /// Dropout to apply after attention.
+    ///
+    /// Default: `Identity`.
+    pub fn dropout(mut self, dropout: Box<dyn BuildModule>) -> Self {
+        self.dropout = dropout;
+        self
+    }
+
+    /// Hidden width of the transformer.
+    ///
+    /// Default: `768`.
+    pub fn hidden_width(mut self, hidden_width: usize) -> Self {
+        self.hidden_width = hidden_width;
+        self
+    }
+
+    /// Layer norm applied to the input.
+    ///
+    /// Default: `Identity`.
+    pub fn layer_norm(mut self, layer_norm: Box<dyn BuildModule>) -> Self {
+        self.layer_norm = layer_norm;
+        self
+    }
+
+    /// Number of key and value heads.
+    ///
+    /// Default: `12`.
+    pub fn n_key_value_heads(mut self, n_key_value_heads: usize) -> Self {
+        self.n_key_value_heads = n_key_value_heads;
+        self
+    }
+
+    /// Number of query heads.
+    ///
+    /// Default: `12`.
+    pub fn n_query_heads(mut self, n_query_heads: usize) -> Self {
+        self.n_query_heads = n_query_heads;
+        self
+    }
+
+    /// Configuration for rotary embeddings.
+    ///
+    /// Default: `None`.
+    pub fn rotary_embeddings(
+        mut self,
+        rotary_embeddings: Option<QueryKeyRotaryEmbeddingsConfig>,
+    ) -> Self {
+        self.rotary_embeddings = rotary_embeddings;
+        self
+    }
+
+    /// Use ALiBi linear biases.
+    ///
+    /// Default: `false`.
+    pub fn use_alibi(mut self, use_alibi: bool) -> Self {
+        self.use_alibi = use_alibi;
+        self
+    }
+
+    /// Use bias in linear layers.
+    ///
+    /// Default: `false`.
+    pub fn use_bias(mut self, use_bias: bool) -> Self {
+        self.use_bias = use_bias;
+        self
+    }
+
+    /// Use parallel attention.
+    ///
+    /// Default: `false`.
+    pub fn use_parallel_attention(mut self, use_parallel_attention: bool) -> Self {
+        self.use_parallel_attention = use_parallel_attention;
+        self
+    }
+}
+
+impl Default for SelfAttentionConfig {
+    fn default() -> Self {
+        Self {
+            attention_heads: AttentionHeads {
+                n_query_heads: 12,
+                n_key_value_heads: 12,
+                qkv_mode: QkvMode::Separate,
+            },
+            attention_scorer: Box::<ScaledDotProductAttentionConfig>::default(),
+            dropout: Box::new(Identity),
+            hidden_width: 768,
+            layer_norm: Box::new(Identity),
+            n_query_heads: 12,
+            n_key_value_heads: 12,
+            rotary_embeddings: None,
+            use_alibi: false,
+            use_bias: false,
+            use_parallel_attention: false,
+        }
+    }
+}
+
+impl BuildAttention for SelfAttentionConfig {
+    /// Build a self-attention module.
+    fn build(&self, vb: VarBuilder) -> Result<Box<dyn Attention>, BoxedError> {
+        let linear_ctor = if self.use_bias {
+            linear
+        } else {
+            linear_no_bias
+        };
+
+        let head_width = self.hidden_width / self.attention_heads.n_query_heads;
+        let key_value_width = self.attention_heads.n_key_value_heads * head_width;
+        let output = linear_ctor(
+            self.hidden_width,
+            self.hidden_width,
+            vb.push_prefix("output"),
+        )
+        .context(SelfAttentionConstructionSnafu)?;
+        let qkv = match self.attention_heads.qkv_mode {
+            QkvMode::MergedSplitBefore | QkvMode::MergedSplitAfter(_) => QkvTensors::Merged(
+                linear_ctor(
+                    self.hidden_width,
+                    self.hidden_width + 2 * key_value_width,
+                    vb.push_prefix("qkv"),
+                )
+                .context(SelfAttentionConstructionSnafu)?,
+            ),
+            QkvMode::Separate => QkvTensors::Separate {
+                query: linear_ctor(
+                    self.hidden_width,
+                    self.hidden_width,
+                    vb.push_prefix("query"),
+                )
+                .context(SelfAttentionConstructionSnafu)?,
+                key: linear_ctor(self.hidden_width, key_value_width, vb.push_prefix("key"))
+                    .context(SelfAttentionConstructionSnafu)?,
+                value: linear_ctor(self.hidden_width, key_value_width, vb.push_prefix("value"))
+                    .context(SelfAttentionConstructionSnafu)?,
+            },
+        };
+
+        Ok(Box::new(SelfAttention {
+            attention_scorer: self
+                .attention_scorer
+                .build(vb.clone())
+                .context(BuildAttentionScorerSnafu)?,
+            attention_heads: self.attention_heads.clone(),
+            dropout: self
+                .dropout
+                .build(vb.push_prefix("dropout"))
+                .context(BuildDropoutSnafu)?,
+            layer_norm: self
+                .layer_norm
+                .build(vb.push_prefix("layer_norm"))
+                .context(BuildLayerNormSnafu)?,
+            output,
+            qkv,
+            rotary_embeds: self
+                .rotary_embeddings
+                .as_ref()
+                .map(|config| config.build(vb))
+                .transpose()
+                .context(BuildQueryKeyRotaryEmbeddingsSnafu)?,
+        }))
+    }
+}
+
 /// Errors for self-attention.
 #[derive(Debug, Snafu)]
 pub enum SelfAttentionError {
+    #[snafu(display("Cannot create or apply attention mask"))]
+    AttentionMask { source: AttentionMaskError },
+
     #[snafu(display("Cannot apply attention scorer"))]
     AttentionScorer { source: BoxedError },
 
     #[snafu(display("Cannot create causal mask"))]
     CausalMask { source: candle_core::Error },
+
+    #[snafu(display("Cannot build attention scorer"))]
+    BuildAttentionScorer { source: BoxedError },
+
+    #[snafu(display("Cannot build dropout"))]
+    BuildDropout { source: BoxedError },
+
+    #[snafu(display("Cannot build layer norm"))]
+    BuildLayerNorm { source: BoxedError },
+
+    #[snafu(display("Cannot build query-key rotary embeddings"))]
+    BuildQueryKeyRotaryEmbeddings {
+        source: QueryKeyRotaryEmbeddingsError,
+    },
 
     #[snafu(display("Cannot combine heads"))]
     CombineHeads { source: candle_core::Error },
@@ -95,67 +336,21 @@ pub enum SelfAttentionError {
 pub struct SelfAttention {
     attention_scorer: Box<dyn AttentionScorer>,
     attention_heads: AttentionHeads,
-    dropout: Dropout,
+    dropout: Box<dyn ModuleT>,
     layer_norm: Box<dyn ModuleT>,
     output: Linear,
     qkv: QkvTensors,
     rotary_embeds: Option<QueryKeyRotaryEmbeddings>,
 }
 
-impl SelfAttention {
-    #[allow(clippy::too_many_arguments)]
-    pub fn new(
-        vb: VarBuilder,
-        attention_heads: AttentionHeads,
-        attention_scorer: Box<dyn AttentionScorer>,
-        dropout: Dropout,
-        hidden_width: usize,
-        layer_norm: Box<dyn ModuleT>,
-        rotary_embeds: Option<QueryKeyRotaryEmbeddings>,
-        _use_bias: bool,
-    ) -> Result<Self, SelfAttentionError> {
-        // TODO: use_bias
-        let head_width = hidden_width / attention_heads.n_key_value_heads;
-        let key_value_width = attention_heads.n_key_value_heads * head_width;
-        let output = linear(hidden_width, hidden_width, vb.push_prefix("output"))
-            .context(SelfAttentionConstructionSnafu)?;
-        let qkv = match attention_heads.qkv_mode {
-            QkvMode::MergedSplitBefore | QkvMode::MergedSplitAfter(_) => QkvTensors::Separate {
-                query: linear(hidden_width, hidden_width, vb.push_prefix("query"))
-                    .context(SelfAttentionConstructionSnafu)?,
-                key: linear(hidden_width, key_value_width, vb.push_prefix("key"))
-                    .context(SelfAttentionConstructionSnafu)?,
-                value: linear(hidden_width, key_value_width, vb.push_prefix("value"))
-                    .context(SelfAttentionConstructionSnafu)?,
-            },
-            QkvMode::Separate => QkvTensors::Merged(
-                linear(
-                    hidden_width,
-                    hidden_width + 2 * key_value_width,
-                    vb.push_prefix("qkv"),
-                )
-                .context(SelfAttentionConstructionSnafu)?,
-            ),
-        };
-
-        Ok(Self {
-            attention_scorer,
-            attention_heads,
-            dropout,
-            layer_norm,
-            output,
-            qkv,
-            rotary_embeds,
-        })
-    }
-
-    pub fn forward(
+impl Attention for SelfAttention {
+    fn forward_t(
         &self,
         input: &Tensor,
         attention_mask: &AttentionMask,
         train: bool,
         use_causal_mask: bool,
-    ) -> Result<Tensor, SelfAttentionError> {
+    ) -> Result<Tensor, BoxedError> {
         let input = self
             .layer_norm
             .forward_t(input, train)
@@ -211,10 +406,11 @@ impl SelfAttention {
             .context(AttentionScorerSnafu)?
             .combine_heads()?;
 
-        self.output
+        Ok(self
+            .output
             .forward(&attn)
             .and_then(|xs| self.dropout.forward_t(&xs, train))
-            .context(OutputSnafu)
+            .context(OutputSnafu)?)
     }
 }
 
@@ -225,14 +421,15 @@ fn create_causal_mask(query: &Tensor, key: &Tensor) -> Result<AttentionMask, Sel
     let (_, _, query_len, _) = query.shape().dims4().context(CausalMaskSnafu)?;
     let (_, _, key_len, _) = key.shape().dims4().context(CausalMaskSnafu)?;
 
-    let causal_mask = Tensor::tril2(key_len, key.dtype(), key.device())
+    let causal_mask = Tensor::tril2(key_len, DType::U32, key.device())
         .and_then(|mask| mask.reshape((1, 1, key_len, key_len)))
         .context(CausalMaskSnafu)?;
-    Ok(AttentionMask::new(
+    AttentionMask::new(
         causal_mask
             .i((.., .., key_len - query_len..key_len, ..key_len))
             .context(CausalMaskSnafu)?,
-    ))
+    )
+    .context(AttentionMaskSnafu)
 }
 
 trait CombineHeads {

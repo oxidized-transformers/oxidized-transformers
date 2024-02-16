@@ -1,4 +1,5 @@
+pub mod architectures;
 pub mod error;
-mod kv_cache;
+pub mod kv_cache;
 pub mod layers;
 pub mod util;

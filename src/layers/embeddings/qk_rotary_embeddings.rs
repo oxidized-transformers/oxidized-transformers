@@ -1,8 +1,98 @@
-use candle_core::{Device, IndexOp, Tensor};
+use candle_core::{IndexOp, Tensor};
+use candle_nn::VarBuilder;
 use snafu::{ensure, ResultExt, Snafu};
 
 use crate::kv_cache::KeyValueCache;
-use crate::layers::embeddings::{RotaryEmbeddings, RotaryEmbeddingsError};
+use crate::layers::embeddings::{RotaryEmbeddings, RotaryEmbeddingsConfig, RotaryEmbeddingsError};
+
+/// Configuration for query-key rotary embeddings.
+#[derive(Debug, Clone)]
+pub struct QueryKeyRotaryEmbeddingsConfig {
+    base: usize,
+    fraction: f32,
+    head_width: usize,
+    seq_len: usize,
+}
+
+impl QueryKeyRotaryEmbeddingsConfig {
+    /// Build query-key rotary embeddings
+    pub fn build(
+        &self,
+        vb: VarBuilder,
+    ) -> Result<QueryKeyRotaryEmbeddings, QueryKeyRotaryEmbeddingsError> {
+        ensure!(
+            (0f32..=1f32).contains(&self.fraction),
+            InvalidRangeSnafu {
+                fraction: self.fraction
+            }
+        );
+
+        // Truncate to get the width in case it is fractional.
+        let rotary_width = (self.fraction * self.head_width as f32) as usize;
+        let rotary_embeds = RotaryEmbeddingsConfig::default()
+            .base(self.base)
+            .seq_len(self.seq_len)
+            .width(rotary_width)
+            .build(vb)
+            .context(RotaryEmbeddingsSnafu)?;
+
+        Ok(QueryKeyRotaryEmbeddings {
+            head_width: self.head_width,
+            rotary_embeds,
+            rotary_width,
+        })
+    }
+
+    /// Base used for `theta`.
+    ///
+    /// This determines the cycle length of the embeddings.
+    ///
+    /// Default: `10_000`
+    pub fn base(mut self, base: usize) -> Self {
+        self.base = base;
+        self
+    }
+
+    /// Fraction of the hidden width to apply rotary embeddings to.
+    ///
+    /// Must be in `[0,1]`.
+    ///
+    /// Default: `1.0`
+    pub fn fraction(mut self, fraction: f32) -> Self {
+        self.fraction = fraction;
+        self
+    }
+
+    /// Head width for query and key attention.
+    ///
+    /// Default: `96`
+    pub fn head_width(mut self, head_width: usize) -> Self {
+        self.head_width = head_width;
+        self
+    }
+
+    /// Number of positions to precompute rotary embeddings for.
+    ///
+    /// The internal data structures will be resized if a longer sequence is
+    /// encountered.
+    ///
+    /// Default: `2048`
+    pub fn seq_len(mut self, seq_len: usize) -> Self {
+        self.seq_len = seq_len;
+        self
+    }
+}
+
+impl Default for QueryKeyRotaryEmbeddingsConfig {
+    fn default() -> Self {
+        Self {
+            base: 10_000,
+            fraction: 1.0,
+            head_width: 96,
+            seq_len: 2048,
+        }
+    }
+}
 
 /// Errors for query-key rotary embeddings.
 #[derive(Debug, Snafu)]
@@ -54,29 +144,6 @@ impl QueryKeyRotaryEmbeddings {
     /// * `base` - The base used for `theta` (normally 10_000). Determines the cycle
     ///    length of the embeddings.
     /// * `device` - Device on which the module is to be initialized.
-    pub fn new(
-        fraction: f32,
-        head_width: usize,
-        seq_len: usize,
-        base: usize,
-        device: &Device,
-    ) -> Result<Self, QueryKeyRotaryEmbeddingsError> {
-        ensure!(
-            (0f32..=1f32).contains(&fraction),
-            InvalidRangeSnafu { fraction }
-        );
-
-        // Truncate to get the width in case it is fractional.
-        let rotary_width = (fraction * head_width as f32) as usize;
-        let rotary_embeds = RotaryEmbeddings::new(rotary_width, seq_len, base, device)
-            .context(RotaryEmbeddingsSnafu)?;
-
-        Ok(QueryKeyRotaryEmbeddings {
-            head_width,
-            rotary_embeds,
-            rotary_width,
-        })
-    }
 
     /// Apply rotary embeddings to the query and key.
     ///
@@ -168,22 +235,26 @@ impl QueryKeyRotaryEmbeddings {
 
 #[cfg(test)]
 mod tests {
-    use crate::util::tests::assert_close;
-    use candle_core::{Device, Tensor};
+    use candle_core::{DType, Device, Tensor};
+    use candle_nn::VarBuilder;
 
-    use super::QueryKeyRotaryEmbeddings;
+    use crate::layers::embeddings::QueryKeyRotaryEmbeddingsConfig;
+    use crate::util::tests::assert_close;
 
     #[test]
     fn query_key_rotary_has_correct_output() {
         for initial_len in [10, 2] {
-            let device = Device::Cpu;
-            let rotary =
-                QueryKeyRotaryEmbeddings::new(1.0, 4, initial_len, 10000, &device).unwrap();
-            let query = Tensor::arange(0f32, 16f32, &device)
+            let vb = candle_nn::VarBuilder::zeros(DType::F32, &Device::Cpu);
+            let rotary = QueryKeyRotaryEmbeddingsConfig::default()
+                .head_width(4)
+                .seq_len(initial_len)
+                .build(vb.clone())
+                .unwrap();
+            let query = Tensor::arange(0f32, 16f32, &vb.device())
                 .unwrap()
                 .reshape((1, 1, 4, 4))
                 .unwrap();
-            let key = Tensor::arange(16f32, 32f32, &device)
+            let key = Tensor::arange(16f32, 32f32, &vb.device())
                 .unwrap()
                 .reshape((1, 1, 4, 4))
                 .unwrap();
@@ -197,7 +268,7 @@ mod tests {
                         -12.4221, 8.7782, 3.1129, 11.1778, -13.8556, 12.5442, -12.1665, 15.3832,
                     ],
                     (1, 1, 4, 4),
-                    &device,
+                    &vb.device(),
                 )
                 .unwrap(),
                 1e-4,
@@ -210,7 +281,7 @@ mod tests {
                         -33.6293, 24.4550, 11.0033, 27.4946, -31.9534, 28.0571, -25.7484, 31.8559,
                     ],
                     (1, 1, 4, 4),
-                    &device,
+                    &vb.device(),
                 )
                 .unwrap(),
                 1e-4,
@@ -221,14 +292,18 @@ mod tests {
     #[test]
     fn query_key_rotary_fractional_has_correct_output() {
         for initial_len in [10, 2] {
-            let device = Device::Cpu;
-            let rotary =
-                QueryKeyRotaryEmbeddings::new(0.5, 8, initial_len, 10000, &device).unwrap();
-            let query = Tensor::arange(0f32, 32f32, &device)
+            let vb = VarBuilder::zeros(DType::F32, &Device::Cpu);
+            let rotary = QueryKeyRotaryEmbeddingsConfig::default()
+                .fraction(0.5)
+                .head_width(8)
+                .seq_len(initial_len)
+                .build(vb.clone())
+                .unwrap();
+            let query = Tensor::arange(0f32, 32f32, &vb.device())
                 .unwrap()
                 .reshape((1, 1, 4, 8))
                 .unwrap();
-            let key = Tensor::arange(32f32, 64f32, &device)
+            let key = Tensor::arange(32f32, 64f32, &vb.device())
                 .unwrap()
                 .reshape((1, 1, 4, 8))
                 .unwrap();
@@ -244,7 +319,7 @@ mod tests {
                         24.1789, -22.3529, 27.7377, 28.0000, 29.0000, 30.0000, 31.0000,
                     ],
                     (1, 1, 4, 8),
-                    &device,
+                    &vb.device(),
                 )
                 .unwrap(),
                 1e-4,
@@ -260,7 +335,7 @@ mod tests {
                         -63.6245, 55.2046, -49.5168, 60.6832, 60.0000, 61.0000, 62.0000, 63.0000,
                     ],
                     (1, 1, 4, 8),
-                    &device,
+                    &vb.device(),
                 )
                 .unwrap(),
                 1e-4,

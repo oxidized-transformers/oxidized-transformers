@@ -1,6 +1,60 @@
 use candle_core::{Device, IndexOp, Tensor};
 use snafu::{ResultExt, Snafu};
 
+/// ALiBi configuration.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct AttentionLinearBiasesConfig {
+    n_attention_heads: usize,
+    is_causal: bool,
+    is_inverted: bool,
+}
+
+impl AttentionLinearBiasesConfig {
+    /// Build an ALiBi module.
+    pub fn build(&self) -> Result<AttentionLinearBiases, AttentionLinearBiasesError> {
+        let slopes = AttentionLinearBiases::calculate_slopes(self.n_attention_heads)?;
+        Ok(AttentionLinearBiases {
+            slopes,
+            is_causal: self.is_causal,
+            is_inverted: self.is_inverted,
+        })
+    }
+
+    /// Number of attention heads.
+    ///
+    /// Default: `12`.
+    pub fn n_attention_heads(mut self, n_attention_heads: usize) -> Self {
+        self.n_attention_heads = n_attention_heads;
+        self
+    }
+
+    /// Use causal attention.
+    ///
+    /// Default: `false`.
+    pub fn is_causal(mut self, is_causal: bool) -> Self {
+        self.is_causal = is_causal;
+        self
+    }
+
+    /// Invert the linear bias.
+    ///
+    /// Default: `false`.
+    pub fn is_inverted(mut self, is_inverted: bool) -> Self {
+        self.is_inverted = is_inverted;
+        self
+    }
+}
+
+impl Default for AttentionLinearBiasesConfig {
+    fn default() -> Self {
+        Self {
+            n_attention_heads: 12,
+            is_causal: false,
+            is_inverted: false,
+        }
+    }
+}
+
 /// Errors for calculation of attention linear biases.
 #[derive(Debug, Snafu)]
 pub enum AttentionLinearBiasesError {
@@ -17,6 +71,7 @@ pub enum AttentionLinearBiasesError {
 /// Linear biases for attention (ALiBi).
 ///
 /// See [Press et al., 2022](https://arxiv.org/abs/2108.12409).
+#[derive(Clone, Debug)]
 pub struct AttentionLinearBiases {
     slopes: Tensor,
     is_causal: bool,
@@ -24,24 +79,6 @@ pub struct AttentionLinearBiases {
 }
 
 impl AttentionLinearBiases {
-    /// Construct a new linear bias layer for attention.
-    ///
-    /// * n_attention_heads - Number of attention heads.
-    /// * is_causal - Use causal attention.
-    /// * is_inverted - Invert the linear bias.
-    pub fn new(
-        n_attention_heads: usize,
-        is_causal: bool,
-        is_inverted: bool,
-    ) -> Result<Self, AttentionLinearBiasesError> {
-        let slopes = Self::calculate_slopes(n_attention_heads)?;
-        Ok(Self {
-            slopes,
-            is_causal,
-            is_inverted,
-        })
-    }
-
     /// Calculate the linear bias slopes for a given number
     /// of attention heads.
     ///
@@ -150,13 +187,16 @@ mod tests {
     use crate::util::tests::assert_close;
     use candle_core::{DType, Device, Tensor};
 
-    use super::AttentionLinearBiases;
+    use super::AttentionLinearBiasesConfig;
 
     #[test]
     fn test_attention_linear_biases_slopes() {
         let device = Device::Cpu;
 
-        let pow2_biases = AttentionLinearBiases::new(8, false, false).unwrap();
+        let pow2_biases = AttentionLinearBiasesConfig::default()
+            .n_attention_heads(8)
+            .build()
+            .unwrap();
         assert_close(
             &pow2_biases.slopes,
             &Tensor::new(
@@ -173,7 +213,10 @@ mod tests {
             1e-4,
         );
 
-        let non_pow2_biases = AttentionLinearBiases::new(12, false, false).unwrap();
+        let non_pow2_biases = AttentionLinearBiasesConfig::default()
+            .n_attention_heads(12)
+            .build()
+            .unwrap();
         assert_close(
             &non_pow2_biases.slopes,
             &Tensor::new(
@@ -206,7 +249,11 @@ mod tests {
     fn test_attention_linear_biases_causal() {
         let device = Device::Cpu;
 
-        let causal = AttentionLinearBiases::new(4, true, false).unwrap();
+        let causal = AttentionLinearBiasesConfig::default()
+            .n_attention_heads(4)
+            .is_causal(true)
+            .build()
+            .unwrap();
         assert_close(
             &causal
                 .forward(&Tensor::zeros((1, 4, 1, 3), DType::F32, &device).unwrap())
@@ -236,7 +283,12 @@ mod tests {
             1e-4,
         );
 
-        let inverted = AttentionLinearBiases::new(4, true, true).unwrap();
+        let inverted = AttentionLinearBiasesConfig::default()
+            .n_attention_heads(4)
+            .is_causal(true)
+            .is_inverted(true)
+            .build()
+            .unwrap();
         assert_close(
             &inverted
                 .forward(&Tensor::zeros((1, 4, 1, 3), DType::F32, &device).unwrap())
@@ -261,7 +313,10 @@ mod tests {
     fn test_attention_linear_biases_non_causal() {
         let device = Device::Cpu;
 
-        let non_causal = AttentionLinearBiases::new(4, false, false).unwrap();
+        let non_causal = AttentionLinearBiasesConfig::default()
+            .n_attention_heads(4)
+            .build()
+            .unwrap();
         assert_close(
             &non_causal
                 .forward(&Tensor::zeros((1, 4, 3, 3), DType::F32, &device).unwrap())
@@ -315,7 +370,11 @@ mod tests {
             1e-4,
         );
 
-        let inverted = AttentionLinearBiases::new(4, false, true).unwrap();
+        let inverted = AttentionLinearBiasesConfig::default()
+            .n_attention_heads(4)
+            .is_inverted(true)
+            .build()
+            .unwrap();
         assert_close(
             &inverted
                 .forward(&Tensor::zeros((1, 4, 3, 3), DType::F32, &device).unwrap())
