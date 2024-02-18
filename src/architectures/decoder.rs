@@ -33,6 +33,44 @@ impl<C> LayerOutputs for DecoderOutput<C> {
     }
 }
 
+/// Trait for building decoders.
+pub trait BuildDecoder: Debug {
+    /// Decoder type.
+    type Decoder: Decoder;
+
+    /// Build a decoder.
+    fn build(&self, vb: VarBuilder) -> Result<Self::Decoder, BoxedError>;
+}
+
+/// Trait for decoders.
+pub trait Decoder {
+    /// Cache type for the decoder.
+    type Cache;
+
+    /// Decode an input sequence.
+    ///
+    /// Returns the decoder output and cache.
+    ///
+    /// * `piece_ids` - Input sequence.
+    ///   *Shape:* `(batch_size, seq_len)`
+    /// * `attention_mask` - Attention mask. Sequence elements for which the
+    ///   corresponding mask element is set to `false` are ignored during
+    ///   attention calculation.
+    ///   *Shape:* `(batch_size, seq_len)`
+    /// * `cache` - Cache to avoid recomputing intermediate values.
+    /// * `positions` - Input positions.
+    ///   *Shape:* `(batch_size, seq_len)`
+    /// * `train` - Whether to train the layer.
+    fn forward_t(
+        &self,
+        piece_ids: &Tensor,
+        attention_mask: &AttentionMask,
+        cache: Option<&[Self::Cache]>,
+        positions: Option<&Tensor>,
+        train: bool,
+    ) -> Result<DecoderOutput<Self::Cache>, BoxedError>;
+}
+
 /// Trait for decoder layers.
 pub trait DecoderLayer {
     /// Cache type for the decoder.
