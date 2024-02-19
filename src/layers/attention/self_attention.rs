@@ -83,9 +83,6 @@ pub struct SelfAttentionConfig {
     /// Rotary embedding configuration.
     rotary_embeddings: Option<QueryKeyRotaryEmbeddingsConfig>,
 
-    /// Use ALiBi linear biases.
-    use_alibi: bool,
-
     /// Use bias in linear layers.
     use_bias: bool,
 
@@ -159,14 +156,6 @@ impl SelfAttentionConfig {
         self
     }
 
-    /// Use ALiBi linear biases.
-    ///
-    /// Default: `false`.
-    pub fn use_alibi(mut self, use_alibi: bool) -> Self {
-        self.use_alibi = use_alibi;
-        self
-    }
-
     /// Use bias in linear layers.
     ///
     /// Default: `false`.
@@ -199,7 +188,6 @@ impl Default for SelfAttentionConfig {
             n_query_heads: 12,
             n_key_value_heads: 12,
             rotary_embeddings: None,
-            use_alibi: false,
             use_bias: false,
             use_parallel_attention: false,
         }
