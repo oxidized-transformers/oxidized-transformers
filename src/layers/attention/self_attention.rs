@@ -74,12 +74,6 @@ pub struct SelfAttentionConfig {
     /// Layer norm.
     layer_norm: Box<dyn BuildModule>,
 
-    /// Number of query heads.
-    n_query_heads: usize,
-
-    /// Number of key and value heads.
-    n_key_value_heads: usize,
-
     /// Rotary embedding configuration.
     rotary_embeddings: Option<QueryKeyRotaryEmbeddingsConfig>,
 
@@ -132,22 +126,6 @@ impl SelfAttentionConfig {
         self
     }
 
-    /// Number of key and value heads.
-    ///
-    /// Default: `12`.
-    pub fn n_key_value_heads(mut self, n_key_value_heads: usize) -> Self {
-        self.n_key_value_heads = n_key_value_heads;
-        self
-    }
-
-    /// Number of query heads.
-    ///
-    /// Default: `12`.
-    pub fn n_query_heads(mut self, n_query_heads: usize) -> Self {
-        self.n_query_heads = n_query_heads;
-        self
-    }
-
     /// Configuration for rotary embeddings.
     ///
     /// Default: `None`.
@@ -196,8 +174,6 @@ impl Default for SelfAttentionConfig {
             dropout: Box::new(Identity),
             hidden_width: 768,
             layer_norm: Box::new(Identity),
-            n_query_heads: 12,
-            n_key_value_heads: 12,
             rotary_embeddings: None,
             use_alibi: false,
             use_bias: false,
