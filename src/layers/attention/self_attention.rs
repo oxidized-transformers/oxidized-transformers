@@ -2,7 +2,7 @@ use std::borrow::Cow;
 
 use candle_core::{DType, IndexOp, Module, ModuleT, Tensor};
 use candle_nn::{linear, linear_no_bias, Linear, VarBuilder};
-use snafu::{ResultExt, Snafu};
+use snafu::{ensure, ResultExt, Snafu};
 
 use crate::error::BoxedError;
 use crate::layers::attention::{
@@ -30,7 +30,7 @@ pub struct AttentionHeads {
 /// the sum of the number of query, key, and value heads. We need to split up
 /// the array into separate arrays for query, key, and value heads.
 #[non_exhaustive]
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
 pub enum QkvSplit {
     Default,
     KVSizedChunks,
@@ -39,7 +39,7 @@ pub enum QkvSplit {
 /// How the query, key and value projections are handled in
 /// the self-attention layer.
 #[non_exhaustive]
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
 pub enum QkvMode {
     Separate,
     MergedSplitBefore,
@@ -48,7 +48,11 @@ pub enum QkvMode {
 
 /// Representation of the query, key and value tensors.
 pub enum QkvTensors {
-    Merged(Linear),
+    MergedSplitBefore(Linear),
+    MergedSplitAfter {
+        qkv: Linear,
+        split: QkvSplit,
+    },
     Separate {
         query: Linear,
         key: Linear,
@@ -173,39 +177,62 @@ impl Default for SelfAttentionConfig {
 impl BuildAttention for SelfAttentionConfig {
     /// Build a self-attention module.
     fn build(&self, vb: VarBuilder) -> Result<Box<dyn Attention>, BoxedError> {
+        let hidden_width = self.hidden_width;
+        let n_key_value_heads = self.attention_heads.n_key_value_heads;
+        let n_query_heads = self.attention_heads.n_query_heads;
+
+        ensure!(
+            hidden_width % n_query_heads == 0,
+            InvalidNQueryHeadsSnafu {
+                hidden_width,
+                n_query_heads,
+            }
+        );
+
+        if self.attention_heads.qkv_mode == QkvMode::MergedSplitBefore {
+            ensure!(
+                n_query_heads == n_key_value_heads,
+                InvalidMergedSplitBeforeNHeadsSnafu {
+                    n_key_value_heads,
+                    n_query_heads
+                }
+            )
+        }
+
         let linear_ctor = if self.use_bias {
             linear
         } else {
             linear_no_bias
         };
 
-        let head_width = self.hidden_width / self.attention_heads.n_query_heads;
-        let key_value_width = self.attention_heads.n_key_value_heads * head_width;
-        let output = linear_ctor(
-            self.hidden_width,
-            self.hidden_width,
-            vb.push_prefix("output"),
-        )
-        .context(SelfAttentionConstructionSnafu)?;
+        let head_width = hidden_width / n_query_heads;
+        let key_value_width = n_key_value_heads * head_width;
+        let output = linear_ctor(hidden_width, hidden_width, vb.push_prefix("output"))
+            .context(SelfAttentionConstructionSnafu)?;
         let qkv = match self.attention_heads.qkv_mode {
-            QkvMode::MergedSplitBefore | QkvMode::MergedSplitAfter(_) => QkvTensors::Merged(
+            QkvMode::MergedSplitBefore => QkvTensors::MergedSplitBefore(
                 linear_ctor(
-                    self.hidden_width,
-                    self.hidden_width + 2 * key_value_width,
+                    hidden_width,
+                    hidden_width + 2 * key_value_width,
                     vb.push_prefix("qkv"),
                 )
                 .context(SelfAttentionConstructionSnafu)?,
             ),
-            QkvMode::Separate => QkvTensors::Separate {
-                query: linear_ctor(
-                    self.hidden_width,
-                    self.hidden_width,
-                    vb.push_prefix("query"),
+            QkvMode::MergedSplitAfter(split) => QkvTensors::MergedSplitAfter {
+                qkv: linear_ctor(
+                    hidden_width,
+                    hidden_width + 2 * key_value_width,
+                    vb.push_prefix("qkv"),
                 )
                 .context(SelfAttentionConstructionSnafu)?,
-                key: linear_ctor(self.hidden_width, key_value_width, vb.push_prefix("key"))
+                split,
+            },
+            QkvMode::Separate => QkvTensors::Separate {
+                query: linear_ctor(hidden_width, hidden_width, vb.push_prefix("query"))
                     .context(SelfAttentionConstructionSnafu)?,
-                value: linear_ctor(self.hidden_width, key_value_width, vb.push_prefix("value"))
+                key: linear_ctor(hidden_width, key_value_width, vb.push_prefix("key"))
+                    .context(SelfAttentionConstructionSnafu)?,
+                value: linear_ctor(hidden_width, key_value_width, vb.push_prefix("value"))
                     .context(SelfAttentionConstructionSnafu)?,
             },
         };
@@ -268,14 +295,34 @@ pub enum SelfAttentionError {
     #[snafu(display("Cannot intersect attention and causal mask"))]
     IntersectMasks { source: AttentionMaskError },
 
+    #[snafu(display(
+        "The hidden size ({hidden_width}) must be divisble by the number of query heads ({n_query_heads})"
+    ))]
+    InvalidNQueryHeads {
+        hidden_width: usize,
+        n_query_heads: usize,
+    },
+
+    #[snafu(display(
+        "The number of query ({n_query_heads}) and key-value ({n_key_value_heads}) heads \
+         must be equal when using merged QKV matrix and splitting before projection"
+    ))]
+    InvalidMergedSplitBeforeNHeads {
+        n_key_value_heads: usize,
+        n_query_heads: usize,
+    },
+
     #[snafu(display("Cannot apply layer norm"))]
     LayerNorm { source: candle_core::Error },
 
     #[snafu(display("Cannot apply output layer"))]
     Output { source: candle_core::Error },
 
-    #[snafu(display("Cannot calculate key, query, or value"))]
+    #[snafu(display("Cannot calculate query, key, or value"))]
     Qkv { source: candle_core::Error },
+
+    #[snafu(display("Cannot chunk query, key, and value representations"))]
+    QkvChunk { source: candle_core::Error },
 
     #[snafu(display("Cannot apply rotary embeddings"))]
     RotaryEmbeddings {
@@ -322,21 +369,10 @@ impl Attention for SelfAttention {
 
         let (mut query, mut key, value) = match &self.qkv {
             QkvTensors::Separate { query, key, value } => {
-                let query = query
-                    .forward(&input)
-                    .context(QkvSnafu)?
-                    .split_heads(self.attention_heads.n_query_heads)?;
-                let key = key
-                    .forward(&input)
-                    .context(QkvSnafu)?
-                    .split_heads(self.attention_heads.n_key_value_heads)?;
-                let value = value
-                    .forward(&input)
-                    .context(QkvSnafu)?
-                    .split_heads(self.attention_heads.n_key_value_heads)?;
-                (query, key, value)
+                self.query_key_value_separate(value, query, key, &input)?
             }
-            _ => unimplemented!(),
+            QkvTensors::MergedSplitAfter { .. } => todo!(),
+            QkvTensors::MergedSplitBefore(qkv) => self.query_key_value_split_before(qkv, &input)?,
         };
 
         if let Some(rotary_embeds) = &self.rotary_embeds {
@@ -375,6 +411,62 @@ impl Attention for SelfAttention {
             .forward(&attn)
             .and_then(|xs| self.dropout.forward_t(&xs, train))
             .context(OutputSnafu)?)
+    }
+}
+
+impl SelfAttention {
+    /// Compute query, key, and value with separate projections.
+    fn query_key_value_separate(
+        &self,
+        value: &Linear,
+        query: &Linear,
+        key: &Linear,
+        input: &Tensor,
+    ) -> Result<(Tensor, Tensor, Tensor), BoxedError> {
+        let query = query
+            .forward(input)
+            .context(QkvSnafu)?
+            .split_heads(self.attention_heads.n_query_heads)?;
+        let key = key
+            .forward(input)
+            .context(QkvSnafu)?
+            .split_heads(self.attention_heads.n_key_value_heads)?;
+        let value = value
+            .forward(input)
+            .context(QkvSnafu)?
+            .split_heads(self.attention_heads.n_key_value_heads)?;
+        Ok((query, key, value))
+    }
+
+    /// Compute query, key, and value with a single projection.
+    ///
+    /// Split heads before query, key, and value.
+    fn query_key_value_split_before(
+        &self,
+        qkv: &Linear,
+        input: &Tensor,
+    ) -> Result<(Tensor, Tensor, Tensor), BoxedError> {
+        let proj = qkv
+            .forward(input)
+            .context(QkvSnafu)?
+            .split_heads(self.attention_heads.n_query_heads)?;
+
+        let (_, _, _, all_heads_size) = proj.shape().dims4().context(QkvSnafu)?;
+        let head_size = all_heads_size / 3;
+
+        // Similar to chunk, but avoid intermediate Vec. Needs to be contiguous or
+        // matrix multiplication fails later.
+        let query = proj.narrow(3, 0, head_size).context(QkvChunkSnafu)?;
+        let key = proj
+            .narrow(3, head_size, head_size)
+            .context(QkvChunkSnafu)?;
+        let value = proj
+            .narrow(3, 2 * head_size, head_size)
+            // Needs to be contiguous to avoid matmul stride error.
+            .and_then(|xs| xs.contiguous())
+            .context(QkvChunkSnafu)?;
+
+        Ok((query, key, value))
     }
 }
 
