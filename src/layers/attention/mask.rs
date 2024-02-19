@@ -32,6 +32,12 @@ impl AttentionMask {
         Ok(AttentionMask { bool_mask })
     }
 
+    /// Boolean mask tensor.
+    /// *Shape:* `(batch_size, seq_len)`
+    pub fn bool_mask(&self) -> &Tensor {
+        &self.bool_mask
+    }
+
     /// Extend the mask using another mask.
     pub fn extend(&self, other: &Self) -> Result<Self, AttentionMaskError> {
         Ok(AttentionMask {
