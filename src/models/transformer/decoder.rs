@@ -132,10 +132,11 @@ impl Decoder for TransformerDecoder {
         &self,
         piece_ids: &Tensor,
         attention_mask: &AttentionMask,
-        mut cache: Option<&[KeyValueCache]>,
+        cache: Option<impl AsRef<[KeyValueCache]>>,
         positions: Option<&Tensor>,
         train: bool,
     ) -> Result<DecoderOutput<Self::Cache>, BoxedError> {
+        let mut cache = cache.as_ref().map(AsRef::as_ref);
         let embeddings = self
             .embeddings
             .forward(piece_ids, train, None, None)
@@ -158,11 +159,8 @@ impl Decoder for TransformerDecoder {
             layer_outputs.push(next_layer_output.clone());
             layer_output = next_layer_output;
 
-            if cache.is_some() {
-                new_cache.push(
-                    next_layer_cache
-                        .expect("Layer did not output cache, although it was requested."),
-                );
+            if let Some(next_layer_cache) = next_layer_cache {
+                new_cache.push(next_layer_cache);
             }
         }
 

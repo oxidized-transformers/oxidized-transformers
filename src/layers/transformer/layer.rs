@@ -219,7 +219,7 @@ impl TransformerLayer {
         &self,
         input: &Tensor,
         attention_mask: &AttentionMask,
-        _cache: Option<&KeyValueCache>,
+        cache: Option<&KeyValueCache>,
         _positions: Option<&Tensor>,
         train: bool,
         use_causal_mask: bool,
@@ -227,9 +227,9 @@ impl TransformerLayer {
         let mut residual = input.clone();
 
         // Apply attention block.
-        let attn_out = self
+        let (attn_out, cache) = self
             .mha
-            .forward_t(input, attention_mask, train, use_causal_mask)
+            .forward_t(input, attention_mask, cache, train, use_causal_mask)
             .context(SelfAttentionSnafu)?;
 
         // Apply post-attention residual connection.
@@ -261,7 +261,7 @@ impl TransformerLayer {
             .and_then(|xs| self.ffn_residual_layer_norm.forward_t(&xs, train))
             .context(ResidualSnafu)?;
 
-        Ok((output, None))
+        Ok((output, cache))
     }
 }
 

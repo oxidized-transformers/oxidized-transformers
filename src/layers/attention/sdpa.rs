@@ -5,8 +5,8 @@ use snafu::{ResultExt, Snafu};
 
 use crate::error::BoxedError;
 use crate::layers::attention::{
-    AttentionLinearBiases, AttentionLinearBiasesConfig, AttentionLinearBiasesError, AttentionMask,
-    AttentionMaskError, AttentionScorer, BuildAttentionScorer,
+    AttentionLinearBiases, AttentionLinearBiasesConfig, AttentionLinearBiasesError,
+    AttentionScorer, BuildAttentionScorer, QueryKeyAttentionMask, QueryKeyAttentionMaskError,
 };
 use crate::layers::build_module::BuildModule;
 use crate::layers::identity::Identity;
@@ -69,7 +69,7 @@ pub enum ScaledDotProductAttentionError {
     AttentionScores { source: candle_core::Error },
 
     #[snafu(display("Cannot apply attention mask"))]
-    AttentionMask { source: AttentionMaskError },
+    AttentionMask { source: QueryKeyAttentionMaskError },
 
     #[snafu(display("Cannot weigh representations using attention mask"))]
     AttentionWeight { source: candle_core::Error },
@@ -98,7 +98,7 @@ impl AttentionScorer for ScaledDotProductAttention {
         query: &Tensor,
         key: &Tensor,
         value: &Tensor,
-        attention_mask: &AttentionMask,
+        attention_mask: &QueryKeyAttentionMask,
         train: bool,
     ) -> Result<Tensor, BoxedError> {
         // TODO: add code path for flash attention, but verify the attention
