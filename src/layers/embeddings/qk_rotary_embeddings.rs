@@ -161,7 +161,7 @@ impl QueryKeyRotaryEmbeddings {
         &self,
         query: &Tensor,
         key: &Tensor,
-        cache: Option<KeyValueCache>,
+        cache: Option<&KeyValueCache>,
         mut positions: Option<Tensor>,
     ) -> Result<(Tensor, Tensor), QueryKeyRotaryEmbeddingsError> {
         let (batch_size, n_heads, seq_len, head_width) =
@@ -181,7 +181,7 @@ impl QueryKeyRotaryEmbeddings {
         // If a cache was provided, but no positions, assume that the
         // positions of the current batch continue from the cache.
         if let (Some(cache), None) = (cache, &positions) {
-            let (_, cache_len, _, _) =
+            let (_, _, cache_len, _) =
                 cache.key.shape().dims4().context(PositionsFromCacheSnafu)?;
 
             positions = Some(
@@ -237,7 +237,10 @@ impl QueryKeyRotaryEmbeddings {
 mod tests {
     use candle_core::{DType, Device, Tensor};
     use candle_nn::VarBuilder;
+    use snafu::{report, ResultExt, Whatever};
 
+    use crate::kv_cache::KeyValueCache;
+    use crate::layers::attention::AttentionMask;
     use crate::layers::embeddings::QueryKeyRotaryEmbeddingsConfig;
     use crate::util::tests::assert_close;
 
@@ -290,7 +293,8 @@ mod tests {
     }
 
     #[test]
-    fn query_key_rotary_fractional_has_correct_output() {
+    #[report]
+    fn query_key_rotary_fractional_has_correct_output() -> Result<(), Whatever> {
         for initial_len in [10, 2] {
             let vb = VarBuilder::zeros(DType::F32, &Device::Cpu);
             let rotary = QueryKeyRotaryEmbeddingsConfig::default()
@@ -298,7 +302,7 @@ mod tests {
                 .head_width(8)
                 .seq_len(initial_len)
                 .build(vb.clone())
-                .unwrap();
+                .whatever_context("Cannot configure rotary embeddings")?;
             let query = Tensor::arange(0f32, 32f32, &vb.device())
                 .unwrap()
                 .reshape((1, 1, 4, 8))
@@ -307,7 +311,9 @@ mod tests {
                 .unwrap()
                 .reshape((1, 1, 4, 8))
                 .unwrap();
-            let (query_rot, key_rot) = rotary.forward(&query, &key, None, None).unwrap();
+            let (query_rot, key_rot) = rotary
+                .forward(&query, &key, None, None)
+                .whatever_context("Cannot apply rotary embeddings to input with cache")?;
 
             assert_close(
                 &query_rot,
@@ -340,6 +346,81 @@ mod tests {
                 .unwrap(),
                 1e-4,
             );
+
+            let cache = Some(KeyValueCache {
+                key: Tensor::zeros((1, 1, 16, 8), DType::F32, &Device::Cpu).unwrap(),
+                value: Tensor::zeros((1, 1, 16, 8), DType::F32, &Device::Cpu).unwrap(),
+                attention_mask: AttentionMask::new(
+                    Tensor::ones((1, 16), DType::U32, &Device::Cpu).unwrap(),
+                )
+                .unwrap(),
+            });
+
+            let (query_rot, key_rot) = rotary
+                .forward(&query, &key, cache.as_ref(), None)
+                .whatever_context("Cannot apply rotary embeddings to input with cache")?;
+
+            assert_close(
+                &query_rot,
+                &Tensor::from_slice(
+                    &[
+                        0.5758f32, 0.5093, -1.9153, 3.1210, 4.0000, 5.0000, 6.0000, 7.0000, 7.4127,
+                        7.0093, -10.4428, 12.3641, 12.0000, 13.0000, 14.0000, 15.0000, 24.0828,
+                        13.3238, -0.1301, 21.7365, 20.0000, 21.0000, 22.0000, 23.0000, 19.8321,
+                        19.4509, 29.3034, 31.2356, 28.0000, 29.0000, 30.0000, 31.0000,
+                    ],
+                    (1, 1, 4, 8),
+                    &vb.device(),
+                )
+                .unwrap(),
+                1e-4,
+            );
+
+            assert_close(
+                &key_rot,
+                &Tensor::from_slice(
+                    &[
+                        -20.8564f32,
+                        27.0024,
+                        -41.7733,
+                        39.8105,
+                        36.0000,
+                        37.0000,
+                        38.0000,
+                        39.0000,
+                        29.3722,
+                        33.1341,
+                        -50.0128,
+                        49.3166,
+                        44.0000,
+                        45.0000,
+                        46.0000,
+                        47.0000,
+                        69.2446,
+                        39.0778,
+                        -3.0316,
+                        58.9485,
+                        52.0000,
+                        53.0000,
+                        54.0000,
+                        55.0000,
+                        46.6746,
+                        44.8316,
+                        65.7380,
+                        68.7032,
+                        60.0000,
+                        61.0000,
+                        62.0000,
+                        63.0000,
+                    ],
+                    (1, 1, 4, 8),
+                    &vb.device(),
+                )
+                .unwrap(),
+                1e-4,
+            );
         }
+
+        Ok(())
     }
 }

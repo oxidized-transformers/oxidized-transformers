@@ -5,6 +5,7 @@ use candle_nn::VarBuilder;
 
 use crate::architectures::output::LayerOutputs;
 use crate::error::BoxedError;
+use crate::kv_cache::KeyValueCache;
 use crate::layers::attention::AttentionMask;
 
 /// Decoder output.
@@ -65,7 +66,7 @@ pub trait Decoder {
         &self,
         piece_ids: &Tensor,
         attention_mask: &AttentionMask,
-        cache: Option<&[Self::Cache]>,
+        cache: Option<impl AsRef<[KeyValueCache]>>,
         positions: Option<&Tensor>,
         train: bool,
     ) -> Result<DecoderOutput<Self::Cache>, BoxedError>;

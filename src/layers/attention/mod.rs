@@ -4,7 +4,10 @@ use candle_core::Tensor;
 use candle_nn::VarBuilder;
 
 mod mask;
-pub use mask::{AttentionMask, AttentionMaskError};
+pub use mask::{
+    AttentionMask, AttentionMaskError, CausalMask, CausalMaskError, QueryKeyAttentionMask,
+    QueryKeyAttentionMaskError,
+};
 
 mod sdpa;
 pub use sdpa::{
@@ -20,6 +23,7 @@ pub use self_attention::{
 };
 
 use crate::error::BoxedError;
+use crate::kv_cache::KeyValueCache;
 
 /// Trait for attention modules.
 pub trait Attention {
@@ -37,9 +41,10 @@ pub trait Attention {
         &self,
         input: &Tensor,
         attention_mask: &AttentionMask,
+        cache: Option<&KeyValueCache>,
         train: bool,
         use_causal_mask: bool,
-    ) -> Result<Tensor, BoxedError>;
+    ) -> Result<(Tensor, Option<KeyValueCache>), BoxedError>;
 }
 
 /// Build an attention module.
@@ -73,7 +78,7 @@ pub trait AttentionScorer {
         query: &Tensor,
         key: &Tensor,
         value: &Tensor,
-        attention_mask: &AttentionMask,
+        attention_mask: &QueryKeyAttentionMask,
         train: bool,
     ) -> Result<Tensor, BoxedError>;
 }

@@ -212,14 +212,18 @@ impl RotaryEmbeddings {
                 (rot_cos, rot_sin)
             }
             Some(positions) => {
-                let positions_flat = positions.reshape(()).context(SliceCacheSnafu)?;
+                // Maximum length is highest position (starting from 0) + 1.
+                let positions_flat = positions.flatten_all().context(SliceCacheSnafu)?;
                 let max_len = positions_flat
                     .max(0)
                     .and_then(|xs| xs.to_scalar::<i64>())
-                    .context(SliceCacheSnafu)? as usize;
+                    .context(SliceCacheSnafu)? as usize
+                    + 1;
+
                 if self.cache.read().unwrap().seq_len()? < max_len {
                     self.resize_rotary_embed(width, max_len)?;
                 }
+
                 let cache = self.cache.read().unwrap();
                 // Flatten positions to index cos/sin arrays, then unflatten.
                 //

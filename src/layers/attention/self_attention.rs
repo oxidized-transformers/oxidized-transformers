@@ -1,13 +1,13 @@
-use std::borrow::Cow;
-
-use candle_core::{DType, IndexOp, Module, ModuleT, Tensor};
+use candle_core::{Module, ModuleT, Tensor};
 use candle_nn::{linear, linear_no_bias, Linear, VarBuilder};
 use snafu::{ensure, ResultExt, Snafu};
 
 use crate::error::BoxedError;
+use crate::kv_cache::KeyValueCache;
 use crate::layers::attention::{
     Attention, AttentionMask, AttentionMaskError, AttentionScorer, BuildAttention,
-    BuildAttentionScorer, ScaledDotProductAttentionConfig, ScaledDotProductAttentionError,
+    BuildAttentionScorer, CausalMask, CausalMaskError, QueryKeyAttentionMask,
+    QueryKeyAttentionMaskError, ScaledDotProductAttentionConfig, ScaledDotProductAttentionError,
 };
 use crate::layers::build_module::BuildModule;
 use crate::layers::embeddings::{
@@ -267,13 +267,13 @@ impl BuildAttention for SelfAttentionConfig {
 #[derive(Debug, Snafu)]
 pub enum SelfAttentionError {
     #[snafu(display("Cannot create or apply attention mask"))]
-    AttentionMask { source: AttentionMaskError },
+    AttentionMask { source: QueryKeyAttentionMaskError },
 
     #[snafu(display("Cannot apply attention scorer"))]
     AttentionScorer { source: BoxedError },
 
     #[snafu(display("Cannot create causal mask"))]
-    CausalMask { source: candle_core::Error },
+    CausalMask { source: CausalMaskError },
 
     #[snafu(display("Cannot build attention scorer"))]
     BuildAttentionScorer { source: BoxedError },
@@ -311,6 +311,9 @@ pub enum SelfAttentionError {
         n_key_value_heads: usize,
         n_query_heads: usize,
     },
+
+    #[snafu(display("Cannot concatenate append key and value to cache"))]
+    ConcatKVCache { source: candle_core::Error },
 
     #[snafu(display("Cannot apply layer norm"))]
     LayerNorm { source: candle_core::Error },
@@ -359,9 +362,10 @@ impl Attention for SelfAttention {
         &self,
         input: &Tensor,
         attention_mask: &AttentionMask,
+        cache: Option<&KeyValueCache>,
         train: bool,
         use_causal_mask: bool,
-    ) -> Result<Tensor, BoxedError> {
+    ) -> Result<(Tensor, Option<KeyValueCache>), BoxedError> {
         let input = self
             .layer_norm
             .forward_t(input, train)
@@ -377,28 +381,40 @@ impl Attention for SelfAttention {
 
         if let Some(rotary_embeds) = &self.rotary_embeds {
             let (query_rot, key_rot) = rotary_embeds
-                .forward(&query, &key, None, None)
+                .forward(&query, &key, cache, None)
                 .context(RotaryEmbeddingsSnafu)?;
             query = query_rot;
             key = key_rot;
         }
 
-        // TODO: kv cache
+        let (key, value, attention_mask) = match cache {
+            Some(cache) => (
+                // Shape is: [batch_size, n_heads, key_len, head_width], so
+                // concat along dimension 2.
+                Tensor::cat(&[&cache.key, &key], 2).context(ConcatKVCacheSnafu)?,
+                Tensor::cat(&[&cache.value, &value], 2).context(ConcatKVCacheSnafu)?,
+                cache
+                    .attention_mask
+                    .extend(attention_mask)
+                    .context(IntersectMasksSnafu)?,
+            ),
+            None => (key, value, attention_mask.clone()),
+        };
+
+        // TODO: rotary embeddings positions
 
         // TODO: causal mask
 
         // TODO: ALiBi
 
-        let combined_mask = if use_causal_mask {
-            let causal_mask = create_causal_mask(&query, &key)?;
-            Cow::Owned(
-                attention_mask
-                    .intersect(&causal_mask)
-                    .context(IntersectMasksSnafu)?,
-            )
-        } else {
-            Cow::Borrowed(attention_mask)
-        };
+        let mut combined_mask: QueryKeyAttentionMask = (&attention_mask).into();
+        if use_causal_mask {
+            let causal_mask =
+                QueryKeyAttentionMask::causal_mask(&query, &key).context(CausalMaskSnafu)?;
+            combined_mask = combined_mask
+                .intersect(&causal_mask)
+                .context(AttentionMaskSnafu)?;
+        }
 
         let attn = self
             .attention_scorer
@@ -406,11 +422,18 @@ impl Attention for SelfAttention {
             .context(AttentionScorerSnafu)?
             .combine_heads()?;
 
-        Ok(self
+        let output = self
             .output
             .forward(&attn)
             .and_then(|xs| self.dropout.forward_t(&xs, train))
-            .context(OutputSnafu)?)
+            .context(OutputSnafu)?;
+        let cache = cache.map(|_| KeyValueCache {
+            key,
+            value,
+            attention_mask,
+        });
+
+        Ok((output, cache))
     }
 }
 
@@ -468,24 +491,6 @@ impl SelfAttention {
 
         Ok((query, key, value))
     }
-}
-
-/// Create a causal mask.
-///
-/// A causal mask ensures that tokens cannot attend to succeeding tokens.
-fn create_causal_mask(query: &Tensor, key: &Tensor) -> Result<AttentionMask, SelfAttentionError> {
-    let (_, _, query_len, _) = query.shape().dims4().context(CausalMaskSnafu)?;
-    let (_, _, key_len, _) = key.shape().dims4().context(CausalMaskSnafu)?;
-
-    let causal_mask = Tensor::tril2(key_len, DType::U32, key.device())
-        .and_then(|mask| mask.reshape((1, 1, key_len, key_len)))
-        .context(CausalMaskSnafu)?;
-    AttentionMask::new(
-        causal_mask
-            .i((.., .., key_len - query_len..key_len, ..key_len))
-            .context(CausalMaskSnafu)?,
-    )
-    .context(AttentionMaskSnafu)
 }
 
 trait CombineHeads {
