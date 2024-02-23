@@ -362,6 +362,7 @@ impl Attention for SelfAttention {
         input: &Tensor,
         attention_mask: &AttentionMask,
         cache: Option<&KeyValueCache>,
+        positions: Option<&Tensor>,
         train: bool,
         use_causal_mask: bool,
     ) -> Result<(Tensor, Option<KeyValueCache>), BoxedError> {
@@ -380,7 +381,7 @@ impl Attention for SelfAttention {
 
         if let Some(rotary_embeds) = &self.rotary_embeds {
             let (query_rot, key_rot) = rotary_embeds
-                .forward(&query, &key, cache, None)
+                .forward(&query, &key, cache, positions)
                 .context(RotaryEmbeddingsSnafu)?;
             query = query_rot;
             key = key_rot;

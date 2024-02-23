@@ -220,7 +220,7 @@ impl TransformerLayer {
         input: &Tensor,
         attention_mask: &AttentionMask,
         cache: Option<&KeyValueCache>,
-        _positions: Option<&Tensor>,
+        positions: Option<&Tensor>,
         train: bool,
         use_causal_mask: bool,
     ) -> Result<(Tensor, Option<KeyValueCache>), TransformerLayerError> {
@@ -229,7 +229,14 @@ impl TransformerLayer {
         // Apply attention block.
         let (attn_out, cache) = self
             .mha
-            .forward_t(input, attention_mask, cache, train, use_causal_mask)
+            .forward_t(
+                input,
+                attention_mask,
+                cache,
+                positions,
+                train,
+                use_causal_mask,
+            )
             .context(SelfAttentionSnafu)?;
 
         // Apply post-attention residual connection.

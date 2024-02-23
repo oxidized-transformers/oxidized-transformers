@@ -162,7 +162,7 @@ impl QueryKeyRotaryEmbeddings {
         query: &Tensor,
         key: &Tensor,
         cache: Option<&KeyValueCache>,
-        mut positions: Option<Tensor>,
+        positions: Option<&Tensor>,
     ) -> Result<(Tensor, Tensor), QueryKeyRotaryEmbeddingsError> {
         let (batch_size, n_heads, seq_len, head_width) =
             query.shape().dims4().context(InvalidRankSnafu {
@@ -180,20 +180,23 @@ impl QueryKeyRotaryEmbeddings {
 
         // If a cache was provided, but no positions, assume that the
         // positions of the current batch continue from the cache.
-        if let (Some(cache), None) = (cache, &positions) {
-            let (_, _, cache_len, _) =
-                cache.key.shape().dims4().context(PositionsFromCacheSnafu)?;
+        let positions = match (cache, &positions) {
+            (Some(cache), None) => {
+                let (_, _, cache_len, _) =
+                    cache.key.shape().dims4().context(PositionsFromCacheSnafu)?;
 
-            positions = Some(
-                Tensor::arange(
-                    cache_len as i64,
-                    cache_len as i64 + seq_len as i64,
-                    query.device(),
+                Some(
+                    Tensor::arange(
+                        cache_len as i64,
+                        cache_len as i64 + seq_len as i64,
+                        query.device(),
+                    )
+                    .and_then(|xs| xs.repeat((batch_size, 1)))
+                    .context(PositionsFromCacheSnafu)?,
                 )
-                .and_then(|xs| xs.repeat((batch_size, 1)))
-                .context(PositionsFromCacheSnafu)?,
-            );
-        }
+            }
+            _ => positions.cloned(),
+        };
 
         if self.rotary_width == head_width {
             // Fast path: we apply rotary embeddings the full key/query vectors.
@@ -292,6 +295,60 @@ mod tests {
         }
     }
 
+    #[test]
+    fn query_key_rotary_with_positions_has_correct_output() {
+        for initial_len in [10, 2] {
+            let vb = candle_nn::VarBuilder::zeros(DType::F32, &Device::Cpu);
+            let rotary = QueryKeyRotaryEmbeddingsConfig::default()
+                .head_width(4)
+                .seq_len(initial_len)
+                .build(vb.clone())
+                .unwrap();
+            let query = Tensor::arange(0f32, 16f32, &vb.device())
+                .unwrap()
+                .reshape((1, 1, 4, 4))
+                .unwrap();
+            let key = Tensor::arange(16f32, 32f32, &vb.device())
+                .unwrap()
+                .reshape((1, 1, 4, 4))
+                .unwrap();
+            let positions = Tensor::arange_step(4i64, 0, -1, &vb.device())
+                .unwrap()
+                .reshape((1, 4))
+                .unwrap();
+            let (query_rot, key_rot) = rotary
+                .forward(&query, &key, None, Some(&positions))
+                .unwrap();
+
+            assert_close(
+                &query_rot,
+                &Tensor::from_slice(
+                    &[
+                        1.5136f32, 0.8792, -1.3073, 3.0376, -4.8067, 4.7878, -5.3755, 7.1468,
+                        -12.4221, 8.7782, 3.1129, 11.1778, -5.2970, 12.8494, 17.6619, 15.1292,
+                    ],
+                    (1, 1, 4, 4),
+                    &vb.device(),
+                )
+                .unwrap(),
+                1e-4,
+            );
+            assert_close(
+                &key_rot,
+                &Tensor::from_slice(
+                    &[
+                        3.1641f32, 16.2266, -23.8744, 19.6646, -22.9045, 20.3007, -18.9574,
+                        23.6196, -33.6293, 24.4550, 11.0033, 27.4946, -10.1157, 28.6886, 39.7703,
+                        31.2884,
+                    ],
+                    (1, 1, 4, 4),
+                    &vb.device(),
+                )
+                .unwrap(),
+                1e-4,
+            );
+        }
+    }
     #[test]
     #[report]
     fn query_key_rotary_fractional_has_correct_output() -> Result<(), Whatever> {

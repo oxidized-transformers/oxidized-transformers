@@ -40,6 +40,7 @@ pub trait Attention {
         input: &Tensor,
         attention_mask: &AttentionMask,
         cache: Option<&KeyValueCache>,
+        positions: Option<&Tensor>,
         train: bool,
         use_causal_mask: bool,
     ) -> Result<(Tensor, Option<KeyValueCache>), BoxedError>;
