@@ -1,4 +1,4 @@
-use candle_core::{Module, ModuleT, Tensor};
+use candle_core::{DType, IndexOp, Module, ModuleT, Tensor};
 use candle_nn::{linear, linear_no_bias, Linear, VarBuilder};
 use snafu::{ensure, ResultExt, Snafu};
 
@@ -6,8 +6,7 @@ use crate::error::BoxedError;
 use crate::kv_cache::KeyValueCache;
 use crate::layers::attention::{
     Attention, AttentionMask, AttentionMaskError, AttentionScorer, BuildAttention,
-    BuildAttentionScorer, CausalMask, CausalMaskError, QueryKeyAttentionMask,
-    QueryKeyAttentionMaskError, ScaledDotProductAttentionConfig, ScaledDotProductAttentionError,
+    BuildAttentionScorer, ScaledDotProductAttentionConfig, ScaledDotProductAttentionError,
 };
 use crate::layers::build_module::BuildModule;
 use crate::layers::embeddings::{
@@ -267,7 +266,7 @@ impl BuildAttention for SelfAttentionConfig {
 #[derive(Debug, Snafu)]
 pub enum SelfAttentionError {
     #[snafu(display("Cannot create or apply attention mask"))]
-    AttentionMask { source: QueryKeyAttentionMaskError },
+    AttentionMask { source: AttentionMaskError },
 
     #[snafu(display("Cannot apply attention scorer"))]
     AttentionScorer { source: BoxedError },
@@ -291,9 +290,6 @@ pub enum SelfAttentionError {
 
     #[snafu(display("Cannot combine heads"))]
     CombineHeads { source: candle_core::Error },
-
-    #[snafu(display("Cannot intersect attention and causal mask"))]
-    IntersectMasks { source: AttentionMaskError },
 
     #[snafu(display(
         "The hidden size ({hidden_width}) must be divisble by the number of query heads ({n_query_heads})"
@@ -339,6 +335,9 @@ pub enum SelfAttentionError {
 
     #[snafu(display("Cannot construct layer"))]
     SelfAttentionConstruction { source: candle_core::Error },
+
+    #[snafu(display("Cannot update self-attention mask"))]
+    SelfAttentionMask { source: SelfAttentionMaskError },
 
     #[snafu(display("Cannot split heads"))]
     SplitHeads { source: candle_core::Error },
@@ -396,7 +395,7 @@ impl Attention for SelfAttention {
                 cache
                     .attention_mask
                     .extend(attention_mask)
-                    .context(IntersectMasksSnafu)?,
+                    .context(AttentionMaskSnafu)?,
             ),
             None => (key, value, attention_mask.clone()),
         };
@@ -407,13 +406,13 @@ impl Attention for SelfAttention {
 
         // TODO: ALiBi
 
-        let mut combined_mask: QueryKeyAttentionMask = (&attention_mask).into();
+        let mut combined_mask: SelfAttentionMask = (&attention_mask).into();
         if use_causal_mask {
             let causal_mask =
-                QueryKeyAttentionMask::causal_mask(&query, &key).context(CausalMaskSnafu)?;
+                SelfAttentionMask::causal_mask(&query, &key).context(CausalMaskSnafu)?;
             combined_mask = combined_mask
                 .intersect(&causal_mask)
-                .context(AttentionMaskSnafu)?;
+                .context(SelfAttentionMaskSnafu)?;
         }
 
         let attn = self
@@ -518,5 +517,144 @@ impl SplitHeads for Tensor {
         self.reshape((batch_size, seq_len, n_heads, head_width))
             .and_then(|heads| heads.transpose(1, 2))
             .context(SplitHeadsSnafu)
+    }
+}
+
+#[derive(Debug, Snafu)]
+pub enum SelfAttentionMaskError {
+    #[snafu(display("Cannot apply logits mask"))]
+    ApplyLogitsMask { source: candle_core::Error },
+
+    #[snafu(display("Cannot intersect masks"))]
+    IntersectMasks { source: candle_core::Error },
+}
+
+/// Mask for self-attention.
+///
+/// This type of mask is used in self-attention to mask out tokens that
+/// should not be attended to by setting their elements to `False`.
+///
+/// In contrast to `AttentionMask`, this mask is shaped for use in
+/// self-attention. `AttentionMask` has the shape `(batch_size, seq_len)`,
+/// where `seq_len` it typically the length of the key. `SelfAttentionMask`
+/// has the shape `(batch_size, heads, query_len, key_len)`, to account for
+/// use cases where the query and key lengths are different. This occurs e.g.
+/// when decoding a sequence with a cache.
+///
+/// The 4-dimensional mask also supports applying a causal mask, so that a
+/// token cannot attend to any succeeding tokens.
+#[derive(Clone, Debug)]
+pub struct SelfAttentionMask {
+    bool_mask: Tensor,
+}
+
+impl From<AttentionMask> for SelfAttentionMask {
+    fn from(attention_mask: AttentionMask) -> Self {
+        SelfAttentionMask::from(&attention_mask)
+    }
+}
+
+impl From<&AttentionMask> for SelfAttentionMask {
+    fn from(attention_mask: &AttentionMask) -> Self {
+        let (batch_len, key_len) = attention_mask
+            .bool_mask
+            .shape()
+            .dims2()
+            .expect("input mask must have two dimensions");
+        SelfAttentionMask {
+            bool_mask: attention_mask
+                .bool_mask
+                .reshape((batch_len, 1, 1, key_len))
+                .expect("Cannot reshape input mask"),
+        }
+    }
+}
+
+impl SelfAttentionMask {
+    /// Use the self-attention mask to mask logits.
+    ///
+    /// * input - Tensor to which the mask is applied.
+    ///   *Shape:* `(batch_size, heads, query_len, key_len)`
+    ///
+    /// Returns: Logits with the attention mask applied.
+    /// *Shape:* `(batch_size, heads, query_len, key_len)`
+    pub fn apply_logit_mask(&self, input: &Tensor) -> Result<Tensor, SelfAttentionMaskError> {
+        // Underflows to -inf for more narrow floating point types, which
+        // is ok for masking.
+        let blocked_value = Tensor::try_from(f32::MIN)
+            .and_then(|xs| xs.broadcast_as(input.shape()))
+            .context(ApplyLogitsMaskSnafu)?;
+        self.bool_mask
+            .broadcast_as(input.shape())
+            .and_then(|xs| xs.where_cond(input, &blocked_value))
+            .context(ApplyLogitsMaskSnafu)
+    }
+
+    /// Merge this attention mask with another self-attention mask.
+    pub fn intersect(
+        &self,
+        other: &SelfAttentionMask,
+    ) -> Result<SelfAttentionMask, SelfAttentionMaskError> {
+        Ok(SelfAttentionMask {
+            bool_mask: self
+                .bool_mask
+                .broadcast_mul(&other.bool_mask)
+                .context(IntersectMasksSnafu)?,
+        })
+    }
+}
+
+#[derive(Debug, Snafu)]
+pub enum CausalMaskError {
+    #[snafu(display("Cannot create causal mask"))]
+    CreateMask { source: candle_core::Error },
+
+    #[snafu(display("Key has invalid number of dimensions"))]
+    KeyDim { source: candle_core::Error },
+
+    #[snafu(display("Query has invalid number of dimensions"))]
+    QueryDim { source: candle_core::Error },
+
+    #[snafu(display("Query length {query_len} must not be larger than key length {key_len}"))]
+    QueryLen { key_len: usize, query_len: usize },
+
+    #[snafu(display("Cannot slice causal mask to key/query size"))]
+    SliceMask { source: candle_core::Error },
+}
+
+/// Trait for creating causal masks.
+pub trait CausalMask: Sized {
+    type Error;
+
+    /// Create a causal mask for the given query and key.
+    ///
+    /// A causal mask ensures that tokens cannot attend to succeeding tokens.
+    ///
+    /// * `query` - Query tensor.
+    ///   *Shape:* `(batch_size, heads, query_len, width)`
+    /// * `key` - Key tensor.
+    ///   *Shape:* `(batch_size, heads, key_len, width)`
+    fn causal_mask(query: &Tensor, key: &Tensor) -> Result<Self, Self::Error>;
+}
+
+impl CausalMask for SelfAttentionMask {
+    type Error = CausalMaskError;
+
+    fn causal_mask(query: &Tensor, key: &Tensor) -> Result<Self, Self::Error> {
+        let (_, _, query_len, _) = query.shape().dims4().context(QueryDimSnafu)?;
+        let (_, _, key_len, _) = key.shape().dims4().context(KeyDimSnafu)?;
+
+        // Slicing will fail down the line if the query length is greater than
+        // the key length.
+        ensure!(query_len <= key_len, QueryLenSnafu { key_len, query_len });
+
+        let causal_mask = Tensor::tril2(key_len, DType::U32, key.device())
+            .and_then(|mask| mask.reshape((1, 1, key_len, key_len)))
+            .context(CreateMaskSnafu)?;
+        Ok(Self {
+            bool_mask: causal_mask
+                .i((.., .., key_len - query_len..key_len, ..key_len))
+                .context(SliceMaskSnafu)?,
+        })
     }
 }
