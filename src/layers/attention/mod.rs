@@ -4,10 +4,7 @@ use candle_core::Tensor;
 use candle_nn::VarBuilder;
 
 mod mask;
-pub use mask::{
-    AttentionMask, AttentionMaskError, CausalMask, CausalMaskError, QueryKeyAttentionMask,
-    QueryKeyAttentionMaskError,
-};
+pub use mask::{AttentionMask, AttentionMaskError};
 
 mod sdpa;
 pub use sdpa::{
@@ -19,7 +16,8 @@ pub use alibi::{AttentionLinearBiases, AttentionLinearBiasesConfig, AttentionLin
 
 mod self_attention;
 pub use self_attention::{
-    AttentionHeads, QkvMode, QkvSplit, SelfAttention, SelfAttentionConfig, SelfAttentionError,
+    AttentionHeads, CausalMask, CausalMaskError, QkvMode, QkvSplit, SelfAttention,
+    SelfAttentionConfig, SelfAttentionMask, SelfAttentionMaskError,
 };
 
 use crate::error::BoxedError;
@@ -78,7 +76,7 @@ pub trait AttentionScorer {
         query: &Tensor,
         key: &Tensor,
         value: &Tensor,
-        attention_mask: &QueryKeyAttentionMask,
+        attention_mask: &SelfAttentionMask,
         train: bool,
     ) -> Result<Tensor, BoxedError>;
 }
