@@ -184,10 +184,10 @@ impl AttentionLinearBiases {
 
 #[cfg(test)]
 mod tests {
-    use crate::util::tests::assert_close;
     use candle_core::{DType, Device, Tensor};
 
     use super::AttentionLinearBiasesConfig;
+    use crate::util::tests::assert_close;
 
     #[test]
     fn test_attention_linear_biases_slopes() {

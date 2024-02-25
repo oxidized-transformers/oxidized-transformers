@@ -1,8 +1,8 @@
-use crate::error::BoxedError;
 use candle_core::{Module, ModuleT, Tensor};
 use candle_nn::{embedding, Embedding, VarBuilder};
 use snafu::{ResultExt, Snafu};
 
+use crate::error::BoxedError;
 use crate::layers::build_module::BuildModule;
 use crate::layers::identity::Identity;
 
