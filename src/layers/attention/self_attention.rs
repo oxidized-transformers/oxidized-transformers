@@ -3,7 +3,7 @@ use candle_nn::{linear, linear_no_bias, Linear, VarBuilder};
 use snafu::{ensure, ResultExt, Snafu};
 
 use crate::error::BoxedError;
-use crate::kv_cache::KeyValueCache;
+use crate::kv_cache::LayerKeyValueCache;
 use crate::layers::attention::{
     Attention, AttentionMask, AttentionMaskError, AttentionScorer, BuildAttention,
     BuildAttentionScorer, ScaledDotProductAttentionConfig, ScaledDotProductAttentionError,
@@ -361,11 +361,11 @@ impl Attention for SelfAttention {
         &self,
         input: &Tensor,
         attention_mask: &AttentionMask,
-        cache: Option<&KeyValueCache>,
+        cache: &mut LayerKeyValueCache,
         positions: Option<&Tensor>,
         train: bool,
         use_causal_mask: bool,
-    ) -> Result<(Tensor, Option<KeyValueCache>), BoxedError> {
+    ) -> Result<Tensor, BoxedError> {
         let input = self
             .layer_norm
             .forward_t(input, train)
@@ -387,19 +387,9 @@ impl Attention for SelfAttention {
             key = key_rot;
         }
 
-        let (key, value, attention_mask) = match cache {
-            Some(cache) => (
-                // Shape is: [batch_size, n_heads, key_len, head_width], so
-                // concat along dimension 2.
-                Tensor::cat(&[&cache.key, &key], 2).context(ConcatKVCacheSnafu)?,
-                Tensor::cat(&[&cache.value, &value], 2).context(ConcatKVCacheSnafu)?,
-                cache
-                    .attention_mask
-                    .extend(attention_mask)
-                    .context(AttentionMaskSnafu)?,
-            ),
-            None => (key, value, attention_mask.clone()),
-        };
+        cache.update(&key, &value)?;
+        let key = cache.key().unwrap_or(&key);
+        let value = cache.value().unwrap_or(&value);
 
         // TODO: rotary embeddings positions
 
@@ -407,10 +397,10 @@ impl Attention for SelfAttention {
 
         // TODO: ALiBi
 
-        let mut combined_mask: SelfAttentionMask = (&attention_mask).into();
+        let mut combined_mask: SelfAttentionMask = attention_mask.into();
         if use_causal_mask {
             let causal_mask =
-                SelfAttentionMask::causal_mask(&query, &key).context(CausalMaskSnafu)?;
+                SelfAttentionMask::causal_mask(&query, key).context(CausalMaskSnafu)?;
             combined_mask = combined_mask
                 .intersect(&causal_mask)
                 .context(SelfAttentionMaskSnafu)?;
@@ -418,7 +408,7 @@ impl Attention for SelfAttention {
 
         let attn = self
             .attention_scorer
-            .forward(&query, &key, &value, &combined_mask, train)
+            .forward(&query, key, value, &combined_mask, train)
             .context(AttentionScorerSnafu)?
             .combine_heads()?;
 
@@ -427,13 +417,8 @@ impl Attention for SelfAttention {
             .forward(&attn)
             .and_then(|xs| self.dropout.forward_t(&xs, train))
             .context(OutputSnafu)?;
-        let cache = cache.map(|_| KeyValueCache {
-            key,
-            value,
-            attention_mask,
-        });
 
-        Ok((output, cache))
+        Ok(output)
     }
 }
 

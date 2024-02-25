@@ -6,7 +6,7 @@ use snafu::{ResultExt, Snafu};
 use crate::architectures::{BuildDecoderLayer, DecoderLayer};
 use crate::architectures::{BuildEncoderLayer, EncoderLayer};
 use crate::error::BoxedError;
-use crate::kv_cache::KeyValueCache;
+use crate::kv_cache::LayerKeyValueCache;
 use crate::layers::attention::{Attention, AttentionMask, BuildAttention, SelfAttentionConfig};
 use crate::layers::build_module::BuildModule;
 use crate::layers::feedforward::PointwiseFeedForwardConfig;
@@ -131,7 +131,7 @@ impl Default for TransformerLayerConfig {
 }
 
 impl BuildDecoderLayer for TransformerLayerConfig {
-    type Cache = KeyValueCache;
+    type Cache = LayerKeyValueCache;
 
     fn build_decoder_layer(
         &self,
@@ -219,15 +219,15 @@ impl TransformerLayer {
         &self,
         input: &Tensor,
         attention_mask: &AttentionMask,
-        cache: Option<&KeyValueCache>,
+        cache: &mut LayerKeyValueCache,
         positions: Option<&Tensor>,
         train: bool,
         use_causal_mask: bool,
-    ) -> Result<(Tensor, Option<KeyValueCache>), TransformerLayerError> {
+    ) -> Result<Tensor, TransformerLayerError> {
         let mut residual = input.clone();
 
         // Apply attention block.
-        let (attn_out, cache) = self
+        let attn_out = self
             .mha
             .forward_t(
                 input,
@@ -268,7 +268,7 @@ impl TransformerLayer {
             .and_then(|xs| self.ffn_residual_layer_norm.forward_t(&xs, train))
             .context(ResidualSnafu)?;
 
-        Ok((output, cache))
+        Ok(output)
     }
 }
 
@@ -280,16 +280,16 @@ pub struct TransformerDecoderLayer {
 }
 
 impl DecoderLayer for TransformerDecoderLayer {
-    type Cache = KeyValueCache;
+    type Cache = LayerKeyValueCache;
 
     fn forward_t(
         &self,
         input: &Tensor,
         attention_mask: &AttentionMask,
-        cache: Option<&Self::Cache>,
+        cache: &mut Self::Cache,
         positions: Option<&Tensor>,
         train: bool,
-    ) -> Result<(Tensor, Option<Self::Cache>), BoxedError> {
+    ) -> Result<Tensor, BoxedError> {
         Ok(self
             .inner
             .forward(input, attention_mask, cache, positions, train, true)?)
@@ -312,8 +312,14 @@ impl EncoderLayer for TransformerEncoderLayer {
         train: bool,
     ) -> Result<Tensor, BoxedError> {
         self.inner
-            .forward(input, attention_mask, None, positions, train, false)
-            .map(|(output, _cache)| output)
+            .forward(
+                input,
+                attention_mask,
+                &mut LayerKeyValueCache::no_cache(),
+                positions,
+                train,
+                false,
+            )
             .boxed()
     }
 }

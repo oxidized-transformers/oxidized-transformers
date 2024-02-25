@@ -2,7 +2,7 @@ use candle_core::{IndexOp, Tensor};
 use candle_nn::VarBuilder;
 use snafu::{ensure, ResultExt, Snafu};
 
-use crate::kv_cache::KeyValueCache;
+use crate::kv_cache::LayerKeyValueCache;
 use crate::layers::embeddings::{RotaryEmbeddings, RotaryEmbeddingsConfig, RotaryEmbeddingsError};
 
 /// Configuration for query-key rotary embeddings.
@@ -161,7 +161,7 @@ impl QueryKeyRotaryEmbeddings {
         &self,
         query: &Tensor,
         key: &Tensor,
-        cache: Option<&KeyValueCache>,
+        cache: &LayerKeyValueCache,
         positions: Option<&Tensor>,
     ) -> Result<(Tensor, Tensor), QueryKeyRotaryEmbeddingsError> {
         let (batch_size, n_heads, seq_len, head_width) =
@@ -180,10 +180,9 @@ impl QueryKeyRotaryEmbeddings {
 
         // If a cache was provided, but no positions, assume that the
         // positions of the current batch continue from the cache.
-        let positions = match (cache, &positions) {
-            (Some(cache), None) => {
-                let (_, _, cache_len, _) =
-                    cache.key.shape().dims4().context(PositionsFromCacheSnafu)?;
+        let positions = match cache.key() {
+            Some(key) => {
+                let (_, _, cache_len, _) = key.shape().dims4().context(PositionsFromCacheSnafu)?;
 
                 Some(
                     Tensor::arange(
@@ -242,8 +241,8 @@ mod tests {
     use candle_nn::VarBuilder;
     use snafu::{report, ResultExt, Whatever};
 
-    use crate::kv_cache::KeyValueCache;
-    use crate::layers::attention::AttentionMask;
+    use crate::kv_cache::LayerKeyValueCache;
+
     use crate::layers::embeddings::QueryKeyRotaryEmbeddingsConfig;
     use crate::util::tests::assert_close;
 
@@ -264,7 +263,9 @@ mod tests {
                 .unwrap()
                 .reshape((1, 1, 4, 4))
                 .unwrap();
-            let (query_rot, key_rot) = rotary.forward(&query, &key, None, None).unwrap();
+            let (query_rot, key_rot) = rotary
+                .forward(&query, &key, &mut LayerKeyValueCache::no_cache(), None)
+                .unwrap();
 
             assert_close(
                 &query_rot,
@@ -317,7 +318,12 @@ mod tests {
                 .reshape((1, 4))
                 .unwrap();
             let (query_rot, key_rot) = rotary
-                .forward(&query, &key, None, Some(&positions))
+                .forward(
+                    &query,
+                    &key,
+                    &LayerKeyValueCache::no_cache(),
+                    Some(&positions),
+                )
                 .unwrap();
 
             assert_close(
@@ -369,7 +375,7 @@ mod tests {
                 .reshape((1, 1, 4, 8))
                 .unwrap();
             let (query_rot, key_rot) = rotary
-                .forward(&query, &key, None, None)
+                .forward(&query, &key, &mut LayerKeyValueCache::no_cache(), None)
                 .whatever_context("Cannot apply rotary embeddings to input with cache")?;
 
             assert_close(
@@ -404,17 +410,17 @@ mod tests {
                 1e-4,
             );
 
-            let cache = Some(KeyValueCache {
-                key: Tensor::zeros((1, 1, 16, 8), DType::F32, &Device::Cpu).unwrap(),
-                value: Tensor::zeros((1, 1, 16, 8), DType::F32, &Device::Cpu).unwrap(),
-                attention_mask: AttentionMask::new(
-                    Tensor::ones((1, 16), DType::U32, &Device::Cpu).unwrap(),
+            let mut cache = LayerKeyValueCache::cache(1, 8, 1, DType::F32, &Device::Cpu)
+                .whatever_context("Cannot create cache")?;
+            cache
+                .update(
+                    &Tensor::zeros((1, 1, 16, 8), DType::F32, &Device::Cpu).unwrap(),
+                    &Tensor::zeros((1, 1, 16, 8), DType::F32, &Device::Cpu).unwrap(),
                 )
-                .unwrap(),
-            });
+                .whatever_context("Cannot update cache")?;
 
             let (query_rot, key_rot) = rotary
-                .forward(&query, &key, cache.as_ref(), None)
+                .forward(&query, &key, &cache, None)
                 .whatever_context("Cannot apply rotary embeddings to input with cache")?;
 
             assert_close(

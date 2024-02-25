@@ -5,7 +5,7 @@ use snafu::{ResultExt, Snafu};
 
 use crate::architectures::{BuildDecoder, BuildDecoderLayer, Decoder, DecoderLayer, DecoderOutput};
 use crate::error::BoxedError;
-use crate::kv_cache::KeyValueCache;
+use crate::kv_cache::{KeyValueCache, LayerKeyValueCache};
 use crate::layers::attention::AttentionMask;
 use crate::layers::build_module::BuildModule;
 use crate::layers::identity::Identity;
@@ -18,7 +18,7 @@ use crate::layers::transformer::{
 #[derive(Debug)]
 pub struct TransformerDecoderConfig {
     embeddings: TransformerEmbeddingsConfig,
-    layer: Box<dyn BuildDecoderLayer<Cache = KeyValueCache>>,
+    layer: Box<dyn BuildDecoderLayer<Cache = LayerKeyValueCache>>,
     n_hidden_layers: usize,
     output_layer_norm: Box<dyn BuildModule>,
 }
@@ -35,7 +35,7 @@ impl TransformerDecoderConfig {
     /// Decoder layer.
     ///
     /// Default: `TransformerLayerConfig::default()`
-    pub fn layer(mut self, layer: Box<dyn BuildDecoderLayer<Cache = KeyValueCache>>) -> Self {
+    pub fn layer(mut self, layer: Box<dyn BuildDecoderLayer<Cache = LayerKeyValueCache>>) -> Self {
         self.layer = layer;
         self
     }
@@ -121,7 +121,7 @@ pub enum TransformerDecoderError {
 /// Decoder using the transformer architecture.
 pub struct TransformerDecoder {
     embeddings: TransformerEmbeddings,
-    layers: Vec<Box<dyn DecoderLayer<Cache = KeyValueCache>>>,
+    layers: Vec<Box<dyn DecoderLayer<Cache = LayerKeyValueCache>>>,
     output_layer_norm: Box<dyn ModuleT>,
 }
 
@@ -132,11 +132,10 @@ impl Decoder for TransformerDecoder {
         &self,
         piece_ids: &Tensor,
         attention_mask: &AttentionMask,
-        cache: Option<impl AsRef<[KeyValueCache]>>,
+        cache: &mut Self::Cache,
         positions: Option<&Tensor>,
         train: bool,
-    ) -> Result<DecoderOutput<Self::Cache>, BoxedError> {
-        let mut cache = cache.as_ref().map(AsRef::as_ref);
+    ) -> Result<DecoderOutput, BoxedError> {
         let embeddings = self
             .embeddings
             .forward(piece_ids, train, None, None)
@@ -144,24 +143,19 @@ impl Decoder for TransformerDecoder {
 
         let mut layer_output = embeddings;
         let mut layer_outputs = Vec::with_capacity(self.layers.len() + 1);
-        let mut new_cache = Vec::with_capacity(self.layers.len());
-        for layer in &self.layers {
-            let (next_cache, layer_cache) = match cache {
-                Some(cache) => (Some(&cache[1..]), Some(&cache[0])),
-                None => (None, None),
-            };
-            cache = next_cache;
-
-            let (next_layer_output, next_layer_cache) = layer
-                .forward_t(&layer_output, attention_mask, layer_cache, positions, train)
+        for (layer_idx, layer) in self.layers.iter().enumerate() {
+            let next_layer_output = layer
+                .forward_t(
+                    &layer_output,
+                    attention_mask,
+                    &mut cache[layer_idx],
+                    positions,
+                    train,
+                )
                 .context(TransformerLayerSnafu)?;
 
             layer_outputs.push(next_layer_output.clone());
             layer_output = next_layer_output;
-
-            if let Some(next_layer_cache) = next_layer_cache {
-                new_cache.push(next_layer_cache);
-            }
         }
 
         if let Some(last) = layer_outputs.last_mut() {
@@ -171,12 +165,6 @@ impl Decoder for TransformerDecoder {
                 .context(LayerNormSnafu)?;
         }
 
-        let new_cache = if new_cache.is_empty() {
-            None
-        } else {
-            Some(new_cache)
-        };
-
-        Ok(DecoderOutput::new(layer_outputs, new_cache))
+        Ok(DecoderOutput::new(layer_outputs))
     }
 }

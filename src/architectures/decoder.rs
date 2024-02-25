@@ -5,26 +5,20 @@ use candle_nn::VarBuilder;
 
 use crate::architectures::output::LayerOutputs;
 use crate::error::BoxedError;
-use crate::kv_cache::KeyValueCache;
 use crate::layers::attention::AttentionMask;
 
 /// Decoder output.
-pub struct DecoderOutput<C> {
+pub struct DecoderOutput {
     all_outputs: Vec<Tensor>,
-    cache: Option<Vec<C>>,
 }
 
-impl<C> DecoderOutput<C> {
-    pub fn new(all_outputs: Vec<Tensor>, cache: Option<Vec<C>>) -> Self {
-        Self { all_outputs, cache }
-    }
-
-    pub fn cache(&self) -> Option<&[C]> {
-        self.cache.as_deref()
+impl DecoderOutput {
+    pub fn new(all_outputs: Vec<Tensor>) -> Self {
+        Self { all_outputs }
     }
 }
 
-impl<C> LayerOutputs for DecoderOutput<C> {
+impl LayerOutputs for DecoderOutput {
     fn layer_outputs(&self) -> &[Tensor] {
         &self.all_outputs
     }
@@ -66,10 +60,10 @@ pub trait Decoder {
         &self,
         piece_ids: &Tensor,
         attention_mask: &AttentionMask,
-        cache: Option<impl AsRef<[KeyValueCache]>>,
+        cache: &mut Self::Cache,
         positions: Option<&Tensor>,
         train: bool,
-    ) -> Result<DecoderOutput<Self::Cache>, BoxedError>;
+    ) -> Result<DecoderOutput, BoxedError>;
 }
 
 /// Trait for decoder layers.
@@ -100,10 +94,10 @@ pub trait DecoderLayer {
         &self,
         piece_ids: &Tensor,
         attention_mask: &AttentionMask,
-        cache: Option<&Self::Cache>,
+        cache: &mut Self::Cache,
         positions: Option<&Tensor>,
         train: bool,
-    ) -> Result<(Tensor, Option<Self::Cache>), BoxedError>;
+    ) -> Result<Tensor, BoxedError>;
 }
 
 /// Trait for building decoder layers.

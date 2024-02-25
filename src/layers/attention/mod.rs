@@ -21,7 +21,7 @@ pub use self_attention::{
 };
 
 use crate::error::BoxedError;
-use crate::kv_cache::KeyValueCache;
+use crate::kv_cache::LayerKeyValueCache;
 
 /// Trait for attention modules.
 pub trait Attention {
@@ -39,11 +39,11 @@ pub trait Attention {
         &self,
         input: &Tensor,
         attention_mask: &AttentionMask,
-        cache: Option<&KeyValueCache>,
+        cache: &mut LayerKeyValueCache,
         positions: Option<&Tensor>,
         train: bool,
         use_causal_mask: bool,
-    ) -> Result<(Tensor, Option<KeyValueCache>), BoxedError>;
+    ) -> Result<Tensor, BoxedError>;
 }
 
 /// Build an attention module.
