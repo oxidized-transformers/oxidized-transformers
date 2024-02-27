@@ -1,4 +1,7 @@
 /// Traits for model architectures.
+mod causal_lm;
+pub use causal_lm::{BuildCausalLM, CausalLM, CausalLMOutput};
+
 mod decoder;
 pub use decoder::{BuildDecoder, BuildDecoderLayer, Decoder, DecoderLayer, DecoderOutput};
 
