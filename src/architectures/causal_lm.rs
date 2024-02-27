@@ -3,7 +3,7 @@ use std::fmt::Debug;
 use candle_core::Tensor;
 use candle_nn::VarBuilder;
 
-use crate::architectures::{DecoderOutput, LayerOutputs};
+use crate::architectures::{BuildArchitecture, DecoderOutput, LayerOutputs};
 use crate::error::BoxedError;
 use crate::layers::attention::AttentionMask;
 
@@ -49,11 +49,22 @@ impl LayerOutputs for CausalLMOutput {
 
 /// Trait for building causal language models.
 pub trait BuildCausalLM: Debug {
-    /// Causal language model type.
     type CausalLM: CausalLM;
 
     /// Build a causal language model.
     fn build(&self, vb: VarBuilder) -> Result<Self::CausalLM, BoxedError>;
+}
+
+impl<C> BuildCausalLM for C
+where
+    C: BuildArchitecture + Debug,
+    C::Architecture: CausalLM,
+{
+    type CausalLM = C::Architecture;
+
+    fn build(&self, vb: VarBuilder) -> Result<Self::CausalLM, BoxedError> {
+        self.build(vb)
+    }
 }
 
 /// Trait for causal language models.

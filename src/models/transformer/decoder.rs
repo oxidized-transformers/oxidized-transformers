@@ -3,7 +3,8 @@ use candle_core::{ModuleT, Tensor};
 use candle_nn::VarBuilder;
 use snafu::{ResultExt, Snafu};
 
-use crate::architectures::{BuildDecoder, BuildDecoderLayer, Decoder, DecoderLayer, DecoderOutput};
+use crate::architectures::BuildArchitecture;
+use crate::architectures::{BuildDecoderLayer, Decoder, DecoderLayer, DecoderOutput};
 use crate::error::BoxedError;
 use crate::kv_cache::{KeyValueCache, LayerKeyValueCache};
 use crate::layers::attention::AttentionMask;
@@ -57,10 +58,10 @@ impl TransformerDecoderConfig {
     }
 }
 
-impl BuildDecoder for TransformerDecoderConfig {
-    type Decoder = TransformerDecoder;
+impl BuildArchitecture for TransformerDecoderConfig {
+    type Architecture = TransformerDecoder;
 
-    fn build(&self, vb: VarBuilder) -> Result<TransformerDecoder, BoxedError> {
+    fn build(&self, vb: VarBuilder) -> Result<Self::Architecture, BoxedError> {
         let embeddings = self
             .embeddings
             .build(vb.push_prefix("embeddings"))

@@ -1,5 +1,6 @@
 use std::fmt::Debug;
 
+use crate::architectures::BuildArchitecture;
 use candle_core::Tensor;
 use candle_nn::VarBuilder;
 
@@ -35,6 +36,18 @@ pub trait BuildDecoder: Debug {
 
     /// Build a decoder.
     fn build(&self, vb: VarBuilder) -> Result<Self::Decoder, BoxedError>;
+}
+
+impl<D> BuildDecoder for D
+where
+    D: BuildArchitecture + Debug,
+    D::Architecture: Decoder,
+{
+    type Decoder = D::Architecture;
+
+    fn build(&self, vb: VarBuilder) -> Result<Self::Decoder, BoxedError> {
+        self.build(vb)
+    }
 }
 
 /// Trait for decoders.
