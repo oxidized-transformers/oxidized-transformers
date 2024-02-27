@@ -2,9 +2,8 @@ use candle_core::{ModuleT, Tensor};
 use candle_nn::{linear_no_bias, VarBuilder};
 use snafu::{ResultExt, Snafu};
 
-use crate::architectures::{
-    BuildCausalLM, BuildDecoder, CausalLM, CausalLMOutput, Decoder, LayerOutputs,
-};
+use crate::architectures::BuildArchitecture;
+use crate::architectures::{BuildDecoder, CausalLM, CausalLMOutput, Decoder, LayerOutputs};
 use crate::error::BoxedError;
 use crate::kv_cache::KeyValueCache;
 use crate::layers::attention::AttentionMask;
@@ -54,10 +53,10 @@ impl Default for TransformerCausalLMConfig {
     }
 }
 
-impl BuildCausalLM for TransformerCausalLMConfig {
-    type CausalLM = TransformerCausalLM;
+impl BuildArchitecture for TransformerCausalLMConfig {
+    type Architecture = TransformerCausalLM;
 
-    fn build(&self, vb: VarBuilder) -> Result<Self::CausalLM, BoxedError> {
+    fn build(&self, vb: VarBuilder) -> Result<Self::Architecture, BoxedError> {
         let decoder = Box::new(
             self.decoder
                 .build(vb.push_prefix("decoder"))
