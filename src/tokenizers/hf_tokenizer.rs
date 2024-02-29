@@ -11,7 +11,6 @@ use super::{
     tokenizer::{Tokenizer, TokenizerEncodeInput},
 };
 use crate::error::BoxedError;
-use crate::repository::file::RepoFile;
 use crate::repository::repo::Repo;
 
 /// `HfTokenizer` errors.
@@ -167,18 +166,16 @@ impl FromRepo for HfTokenizer {
             .context(OpenSpecialTokensMapJSONSnafu)
             .boxed()?;
 
-        ensure!(tokenizer_json.exists(), MissingTokenizerJSONSnafu);
-        let tokenizer = HuggingFaceTokenizer::from_file(tokenizer_json.local_path().unwrap())
+        ensure!(tokenizer_json.is_some(), MissingTokenizerJSONSnafu);
+        let tokenizer = HuggingFaceTokenizer::from_file(tokenizer_json.unwrap())
             .context(LoadHFTokenizerSnafu)?;
 
         let tokenizer_config = tokenizer_config_json
-            .local_path()
             .map(|p| Self::try_parse_json_config(&p))
             .transpose()?
             .flatten();
 
         let special_tokens_map = special_tokens_map_json
-            .local_path()
             .map(|p| Self::try_parse_json_config(&p))
             .transpose()?
             .flatten();
