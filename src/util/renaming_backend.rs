@@ -3,22 +3,20 @@ use candle_nn::var_builder::SimpleBackend;
 use candle_nn::Init;
 
 /// A backend that renames tensors before passing them to the inner backend.
-pub struct RenamingBackend<B, F>
+pub struct RenamingBackend<F>
 where
-    B: SimpleBackend,
     F: Fn(&str) -> String + Send + Sync,
 {
-    inner: B,
+    inner: Box<dyn SimpleBackend>,
     rename_to_inner: F,
 }
 
-impl<B, F> RenamingBackend<B, F>
+impl<F> RenamingBackend<F>
 where
-    B: SimpleBackend,
     F: Fn(&str) -> String + Send + Sync,
 {
     /// Create a new renaming backend.
-    pub fn new(inner: B, rename_to_inner: F) -> Self {
+    pub fn new(inner: Box<dyn SimpleBackend>, rename_to_inner: F) -> Self {
         Self {
             inner,
             rename_to_inner,
@@ -26,9 +24,8 @@ where
     }
 }
 
-impl<B, F> SimpleBackend for RenamingBackend<B, F>
+impl<F> SimpleBackend for RenamingBackend<F>
 where
-    B: SimpleBackend,
     F: Fn(&str) -> String + Send + Sync,
 {
     fn get(
@@ -61,7 +58,7 @@ mod tests {
     #[test]
     fn renaming_backend_renames() {
         let var_map = VarMap::new();
-        let rename = RenamingBackend::new(var_map.clone(), |name| {
+        let rename = RenamingBackend::new(Box::new(var_map.clone()), |name| {
             let mut name = name.to_string();
             name.insert_str(0, "roberta.");
             name = name.replace("piece_embeddings", "word_embeddings");
