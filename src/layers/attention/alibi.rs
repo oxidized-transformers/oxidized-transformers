@@ -185,31 +185,22 @@ impl AttentionLinearBiases {
 #[cfg(test)]
 mod tests {
     use candle_core::{DType, Device, Tensor};
+    use ndarray::array;
 
     use super::AttentionLinearBiasesConfig;
-    use crate::util::tests::assert_close;
+    use crate::util::tests::assert_tensor_eq;
 
     #[test]
     fn test_attention_linear_biases_slopes() {
-        let device = Device::Cpu;
-
         let pow2_biases = AttentionLinearBiasesConfig::default()
             .n_attention_heads(8)
             .build()
             .unwrap();
-        assert_close(
+        assert_tensor_eq(
             &pow2_biases.slopes,
-            &Tensor::new(
-                &[
-                    0.5, 0.25, 0.125, 0.0625, 0.03125, 0.015625, 0.0078125, 0.00390625,
-                ],
-                &device,
-            )
-            .unwrap()
-            .to_dtype(pow2_biases.slopes.dtype())
-            .unwrap()
-            .reshape((1, 8, 1, 1))
-            .unwrap(),
+            array![0.5f32, 0.25, 0.125, 0.0625, 0.03125, 0.015625, 0.0078125, 0.00390625,]
+                .into_shape((1, 8, 1, 1))
+                .unwrap(),
             1e-4,
         );
 
@@ -217,29 +208,23 @@ mod tests {
             .n_attention_heads(12)
             .build()
             .unwrap();
-        assert_close(
+        assert_tensor_eq(
             &non_pow2_biases.slopes,
-            &Tensor::new(
-                &[
-                    0.5,
-                    0.25,
-                    0.125,
-                    0.0625,
-                    0.03125,
-                    0.015625,
-                    0.0078125,
-                    0.00390625,
-                    0.7071067811865476,
-                    0.35355339059327384,
-                    0.17677669529663692,
-                    0.08838834764831849,
-                ],
-                &device,
-            )
-            .unwrap()
-            .to_dtype(non_pow2_biases.slopes.dtype())
-            .unwrap()
-            .reshape((1, 12, 1, 1))
+            array![
+                0.5f32,
+                0.25,
+                0.125,
+                0.0625,
+                0.03125,
+                0.015625,
+                0.0078125,
+                0.00390625,
+                0.7071067811865476,
+                0.35355339059327384,
+                0.17677669529663692,
+                0.08838834764831849,
+            ]
+            .into_shape((1, 12, 1, 1))
             .unwrap(),
             1e-4,
         );
@@ -254,31 +239,25 @@ mod tests {
             .is_causal(true)
             .build()
             .unwrap();
-        assert_close(
+        assert_tensor_eq(
             &causal
                 .forward(&Tensor::zeros((1, 4, 1, 3), DType::F32, &device).unwrap())
                 .unwrap(),
-            &Tensor::new(
-                &[
-                    -0.5000,
-                    -0.2500,
-                    0.0000,
-                    -0.1250,
-                    -0.0625,
-                    0.0000,
-                    -0.03125,
-                    -0.015625,
-                    0.0000,
-                    -0.0078125,
-                    -0.00390625,
-                    0.0000,
-                ],
-                &device,
-            )
-            .unwrap()
-            .to_dtype(DType::F32)
-            .unwrap()
-            .reshape((1, 4, 1, 3))
+            array![
+                -0.5000f32,
+                -0.2500,
+                0.0000,
+                -0.1250,
+                -0.0625,
+                0.0000,
+                -0.03125,
+                -0.015625,
+                0.0000,
+                -0.0078125,
+                -0.00390625,
+                0.0000,
+            ]
+            .into_shape((1, 4, 1, 3))
             .unwrap(),
             1e-4,
         );
@@ -289,21 +268,15 @@ mod tests {
             .is_inverted(true)
             .build()
             .unwrap();
-        assert_close(
+        assert_tensor_eq(
             &inverted
                 .forward(&Tensor::zeros((1, 4, 1, 3), DType::F32, &device).unwrap())
                 .unwrap(),
-            &Tensor::new(
-                &[
-                    0.0000, 0.2500, 0.5000, 0.0000, 0.0625, 0.1250, 0.0000, 0.015625, 0.03125,
-                    0.0000, 0.00390625, 0.0078125,
-                ],
-                &device,
-            )
-            .unwrap()
-            .to_dtype(DType::F32)
-            .unwrap()
-            .reshape((1, 4, 1, 3))
+            array![
+                0.0000f32, 0.2500, 0.5000, 0.0000, 0.0625, 0.1250, 0.0000, 0.015625, 0.03125,
+                0.0000, 0.00390625, 0.0078125,
+            ]
+            .into_shape((1, 4, 1, 3))
             .unwrap(),
             1e-4,
         );
@@ -317,55 +290,49 @@ mod tests {
             .n_attention_heads(4)
             .build()
             .unwrap();
-        assert_close(
+        assert_tensor_eq(
             &non_causal
                 .forward(&Tensor::zeros((1, 4, 3, 3), DType::F32, &device).unwrap())
                 .unwrap(),
-            &Tensor::new(
-                &[
-                    0.0000,
-                    -0.2500,
-                    -0.5000,
-                    -0.2500,
-                    0.0000,
-                    -0.2500,
-                    -0.5000,
-                    -0.2500,
-                    0.0000,
-                    0.0000,
-                    -0.0625,
-                    -0.1250,
-                    -0.0625,
-                    0.0000,
-                    -0.0625,
-                    -0.1250,
-                    -0.0625,
-                    0.0000,
-                    0.0000,
-                    -0.015625,
-                    -0.03125,
-                    -0.015625,
-                    0.0000,
-                    -0.015625,
-                    -0.03125,
-                    -0.015625,
-                    0.0000,
-                    0.0000,
-                    -0.00390625,
-                    -0.0078125,
-                    -0.00390625,
-                    0.0000,
-                    -0.00390625,
-                    -0.0078125,
-                    -0.00390625,
-                    0.0000,
-                ],
-                &device,
-            )
-            .unwrap()
-            .to_dtype(DType::F32)
-            .unwrap()
-            .reshape((1, 4, 3, 3))
+            array![
+                0.0000f32,
+                -0.2500,
+                -0.5000,
+                -0.2500,
+                0.0000,
+                -0.2500,
+                -0.5000,
+                -0.2500,
+                0.0000,
+                0.0000,
+                -0.0625,
+                -0.1250,
+                -0.0625,
+                0.0000,
+                -0.0625,
+                -0.1250,
+                -0.0625,
+                0.0000,
+                0.0000,
+                -0.015625,
+                -0.03125,
+                -0.015625,
+                0.0000,
+                -0.015625,
+                -0.03125,
+                -0.015625,
+                0.0000,
+                0.0000,
+                -0.00390625,
+                -0.0078125,
+                -0.00390625,
+                0.0000,
+                -0.00390625,
+                -0.0078125,
+                -0.00390625,
+                0.0000,
+            ]
+            .into_shape((1, 4, 3, 3))
             .unwrap(),
             1e-4,
         );
@@ -375,24 +342,18 @@ mod tests {
             .is_inverted(true)
             .build()
             .unwrap();
-        assert_close(
+        assert_tensor_eq(
             &inverted
                 .forward(&Tensor::zeros((1, 4, 3, 3), DType::F32, &device).unwrap())
                 .unwrap(),
-            &Tensor::new(
-                &[
-                    0.5000, 0.2500, 0.0000, 0.2500, 0.5000, 0.2500, 0.0000, 0.2500, 0.5000, 0.1250,
-                    0.0625, 0.0000, 0.0625, 0.1250, 0.0625, 0.0000, 0.0625, 0.1250, 0.03125,
-                    0.015625, 0.0000, 0.015625, 0.03125, 0.015625, 0.0000, 0.015625, 0.03125,
-                    0.0078125, 0.00390625, 0.0000, 0.00390625, 0.0078125, 0.00390625, 0.0000,
-                    0.00390625, 0.0078125,
-                ],
-                &device,
-            )
-            .unwrap()
-            .to_dtype(DType::F32)
-            .unwrap()
-            .reshape((1, 4, 3, 3))
+            array![
+                0.5000f32, 0.2500, 0.0000, 0.2500, 0.5000, 0.2500, 0.0000, 0.2500, 0.5000, 0.1250,
+                0.0625, 0.0000, 0.0625, 0.1250, 0.0625, 0.0000, 0.0625, 0.1250, 0.03125, 0.015625,
+                0.0000, 0.015625, 0.03125, 0.015625, 0.0000, 0.015625, 0.03125, 0.0078125,
+                0.00390625, 0.0000, 0.00390625, 0.0078125, 0.00390625, 0.0000, 0.00390625,
+                0.0078125,
+            ]
+            .into_shape((1, 4, 3, 3))
             .unwrap(),
             1e-4,
         );
