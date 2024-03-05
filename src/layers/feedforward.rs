@@ -81,7 +81,7 @@ impl PointwiseFeedForwardConfig {
 impl Default for PointwiseFeedForwardConfig {
     fn default() -> Self {
         Self {
-            activation: Box::new(Activation::GELU),
+            activation: Box::new(Activation::Gelu),
             dropout: Box::new(Identity),
             hidden_width: 768,
             intermediate_width: 3072,
