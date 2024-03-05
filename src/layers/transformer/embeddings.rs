@@ -1,7 +1,8 @@
 use candle_core::{Module, ModuleT, Tensor};
-use candle_nn::{embedding, Embedding, VarBuilder};
+use candle_nn::{embedding, linear, Embedding, Linear, VarBuilder};
 use snafu::{ResultExt, Snafu};
 
+use crate::architectures::{BuildEmbeddings, Embeddings};
 use crate::error::BoxedError;
 use crate::layers::build_module::BuildModule;
 use crate::layers::identity::Identity;
@@ -41,79 +42,6 @@ pub struct TransformerEmbeddingsConfig {
 }
 
 impl TransformerEmbeddingsConfig {
-    pub fn build(
-        &self,
-        vb: VarBuilder,
-    ) -> Result<TransformerEmbeddings, TransformerEmbeddingsError> {
-        let piece_embeddings = embedding(
-            self.n_pieces,
-            self.embedding_width,
-            vb.push_prefix("piece_embeddings"),
-        )
-        .context(ConstructionSnafu)?;
-
-        let type_embeddings = self
-            .n_types
-            .map(|n_types| {
-                embedding(
-                    n_types,
-                    self.embedding_width,
-                    vb.push_prefix("type_embeddings"),
-                )
-            })
-            .transpose()
-            .context(ConstructionSnafu)?;
-
-        let position_embeddings = self
-            .n_positions
-            .map(|n_positions| {
-                embedding(
-                    n_positions,
-                    self.embedding_width,
-                    vb.push_prefix("position_embeddings"),
-                )
-            })
-            .transpose()
-            .context(ConstructionSnafu)?;
-
-        let projection = if self.embedding_width != self.hidden_width {
-            Some(
-                embedding(
-                    self.embedding_width,
-                    self.hidden_width,
-                    vb.push_prefix("projection"),
-                )
-                .context(ConstructionSnafu)?,
-            )
-        } else {
-            None
-        };
-
-        Ok(TransformerEmbeddings {
-            embedding_dropout: self
-                .embedding_dropout
-                .build(vb.push_prefix("embedding_dropout"))
-                .context(BuildDropoutSnafu)?,
-            embedding_layer_norm: self
-                .embedding_layer_norm
-                .build(vb.push_prefix("embedding_layer_norm"))
-                .context(BuildLayerNormSnafu)?,
-            piece_embeddings,
-            position_embeddings,
-            projection,
-            projection_dropout: self
-                .projection_dropout
-                .build(vb.push_prefix("projection_dropout"))
-                .context(BuildDropoutSnafu)?,
-            projection_layer_norm: self
-                .projection_layer_norm
-                .build(vb.push_prefix("projection_layer_norm"))
-                .context(BuildLayerNormSnafu)?,
-
-            type_embeddings,
-        })
-    }
-
     /// Dropout to apply to the embeddings.
     ///
     /// Default: `Identity`.
@@ -206,6 +134,78 @@ impl Default for TransformerEmbeddingsConfig {
     }
 }
 
+impl BuildEmbeddings for TransformerEmbeddingsConfig {
+    fn build(&self, vb: VarBuilder) -> Result<Box<dyn Embeddings>, BoxedError> {
+        let piece_embeddings = embedding(
+            self.n_pieces,
+            self.embedding_width,
+            vb.push_prefix("piece_embeddings"),
+        )
+        .context(ConstructionSnafu)?;
+
+        let type_embeddings = self
+            .n_types
+            .map(|n_types| {
+                embedding(
+                    n_types,
+                    self.embedding_width,
+                    vb.push_prefix("type_embeddings"),
+                )
+            })
+            .transpose()
+            .context(ConstructionSnafu)?;
+
+        let position_embeddings = self
+            .n_positions
+            .map(|n_positions| {
+                embedding(
+                    n_positions,
+                    self.embedding_width,
+                    vb.push_prefix("position_embeddings"),
+                )
+            })
+            .transpose()
+            .context(ConstructionSnafu)?;
+
+        let projection = if self.embedding_width != self.hidden_width {
+            Some(
+                linear(
+                    self.embedding_width,
+                    self.hidden_width,
+                    vb.push_prefix("projection"),
+                )
+                .context(ConstructionSnafu)?,
+            )
+        } else {
+            None
+        };
+
+        Ok(Box::new(TransformerEmbeddings {
+            embedding_dropout: self
+                .embedding_dropout
+                .build(vb.push_prefix("embedding_dropout"))
+                .context(BuildDropoutSnafu)?,
+            embedding_layer_norm: self
+                .embedding_layer_norm
+                .build(vb.push_prefix("embedding_layer_norm"))
+                .context(BuildLayerNormSnafu)?,
+            piece_embeddings,
+            position_embeddings,
+            projection,
+            projection_dropout: self
+                .projection_dropout
+                .build(vb.push_prefix("projection_dropout"))
+                .context(BuildDropoutSnafu)?,
+            projection_layer_norm: self
+                .projection_layer_norm
+                .build(vb.push_prefix("projection_layer_norm"))
+                .context(BuildLayerNormSnafu)?,
+
+            type_embeddings,
+        }))
+    }
+}
+
 /// Errors for transformer embeddings.
 #[derive(Debug, Snafu)]
 pub enum TransformerEmbeddingsError {
@@ -245,7 +245,7 @@ pub struct TransformerEmbeddings {
     piece_embeddings: Embedding,
     type_embeddings: Option<Embedding>,
     position_embeddings: Option<Embedding>,
-    projection: Option<Embedding>,
+    projection: Option<Linear>,
     projection_dropout: Box<dyn ModuleT>,
     projection_layer_norm: Box<dyn ModuleT>,
 }
@@ -253,9 +253,10 @@ pub struct TransformerEmbeddings {
 impl TransformerEmbeddings {
     /// Get position identifiers _[0..seq_len)_.
     fn get_positions(x: &Tensor) -> Result<Tensor, TransformerEmbeddingsError> {
-        let (_, seq_len) = x.shape().dims2().context(PositionEmbeddingsSnafu)?;
+        let (batch_size, seq_len) = x.shape().dims2().context(PositionEmbeddingsSnafu)?;
         Tensor::arange(0, seq_len as i64, x.device())
             .and_then(|xs| xs.reshape((1, seq_len)))
+            .and_then(|xs| xs.repeat(&[batch_size, 1]))
             .context(PositionEmbeddingsSnafu)
     }
 
@@ -263,15 +264,16 @@ impl TransformerEmbeddings {
     fn get_type_ids(x: &Tensor) -> Result<Tensor, TransformerEmbeddingsError> {
         x.zeros_like().context(TypeEmbeddingsSnafu)
     }
+}
 
-    /// Calculate the piece embeddings.
-    pub fn forward(
+impl Embeddings for TransformerEmbeddings {
+    fn forward(
         &self,
         piece_ids: &Tensor,
         train: bool,
         positions: Option<&Tensor>,
         type_ids: Option<&Tensor>,
-    ) -> Result<Tensor, TransformerEmbeddingsError> {
+    ) -> Result<Tensor, BoxedError> {
         let mut embeddings = self
             .piece_embeddings
             .forward(piece_ids)
@@ -287,6 +289,7 @@ impl TransformerEmbeddings {
                 .and_then(|xs| embeddings + xs)
                 .context(TypeEmbeddingsSnafu)?;
         }
+
         if let Some(position_embeddings) = &self.position_embeddings {
             let positions = match positions {
                 Some(positions) => positions.clone(),

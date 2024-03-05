@@ -3,17 +3,14 @@ use candle_core::{ModuleT, Tensor};
 use candle_nn::VarBuilder;
 use snafu::{ResultExt, Snafu};
 
-use crate::architectures::BuildArchitecture;
+use crate::architectures::{BuildArchitecture, BuildEmbeddings, Embeddings};
 use crate::architectures::{BuildDecoderLayer, Decoder, DecoderLayer, DecoderOutput};
 use crate::error::BoxedError;
 use crate::kv_cache::{KeyValueCache, LayerKeyValueCache};
 use crate::layers::attention::AttentionMask;
 use crate::layers::build_module::BuildModule;
 use crate::layers::identity::Identity;
-use crate::layers::transformer::{
-    TransformerEmbeddings, TransformerEmbeddingsConfig, TransformerEmbeddingsError,
-    TransformerLayerConfig,
-};
+use crate::layers::transformer::{TransformerEmbeddingsConfig, TransformerLayerConfig};
 
 /// Transformer decoder configuration.
 #[derive(Debug)]
@@ -104,13 +101,13 @@ pub enum TransformerDecoderError {
     BuildLayerNorm { source: BoxedError },
 
     #[snafu(display("Cannot construct or apply embeddings"))]
-    BuildTransformerEmbeddings { source: TransformerEmbeddingsError },
+    BuildTransformerEmbeddings { source: BoxedError },
 
     #[snafu(display("Cannot build transformer layer"))]
     BuildTransformerLayer { source: BoxedError },
 
     #[snafu(display("Cannot construct or apply embeddings"))]
-    Embedding { source: TransformerEmbeddingsError },
+    Embedding { source: BoxedError },
 
     #[snafu(display("Cannot construct or apply layer norm"))]
     LayerNorm { source: candle_core::Error },
@@ -121,7 +118,7 @@ pub enum TransformerDecoderError {
 
 /// Decoder using the transformer architecture.
 pub struct TransformerDecoder {
-    embeddings: TransformerEmbeddings,
+    embeddings: Box<dyn Embeddings>,
     layers: Vec<Box<dyn DecoderLayer<Cache = LayerKeyValueCache>>>,
     output_layer_norm: Box<dyn ModuleT>,
 }
