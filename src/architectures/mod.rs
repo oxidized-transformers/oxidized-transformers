@@ -1,14 +1,15 @@
 /// Traits for model architectures.
+use candle_nn::VarBuilder;
+
 mod causal_lm;
 
-use candle_nn::VarBuilder;
 pub use causal_lm::{BuildCausalLM, CausalLM, CausalLMOutput};
 
 mod decoder;
 pub use decoder::{BuildDecoder, BuildDecoderLayer, Decoder, DecoderLayer, DecoderOutput};
 
 mod encoder;
-pub use encoder::{BuildEncoderLayer, EncoderLayer, EncoderOutput};
+pub use encoder::{BuildEncoder, BuildEncoderLayer, Encoder, EncoderLayer, EncoderOutput};
 
 mod embeddings;
 pub use embeddings::{BuildEmbeddings, Embeddings};
