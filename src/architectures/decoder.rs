@@ -90,7 +90,7 @@ pub trait DecoderLayer {
 
     /// Apply the decoder layer to the given hidden representations.
     ///
-    /// * `piece_ids` - Hidden representations to apply the layer to.
+    /// * `input` - Hidden representations to apply the layer to.
     ///   *Shape:* `(batch_size, seq_len, width)`
     /// * `attention_mask` - Attention mask. Sequence elements for which the
     ///    corresponding mask element is set to `false` are ignored
@@ -105,7 +105,7 @@ pub trait DecoderLayer {
     /// *Shape:* ``(batch_size, seq_len, width)``
     fn forward_t(
         &self,
-        piece_ids: &Tensor,
+        input: &Tensor,
         attention_mask: &AttentionMask,
         cache: &mut Self::Cache,
         positions: Option<&Tensor>,
