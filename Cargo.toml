@@ -20,3 +20,5 @@ tokenizers = { version = "0.15", features = ["http"] }
 approx = "0.5"
 rstest = "0.18"
 ndarray = { version = "0.15.4", features = ["approx-0_5"] }
+rand_pcg = "0.3"
+rand_core = "0.6"

@@ -3,4 +3,7 @@ pub use gpt_neox::{GPTNeoXCausalLM, GPTNeoXDecoder};
 
 pub mod hf;
 
+mod llama;
+pub use llama::{LlamaCausalLM, LlamaDecoder};
+
 pub mod transformer;
