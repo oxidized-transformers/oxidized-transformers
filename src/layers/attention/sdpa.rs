@@ -106,9 +106,11 @@ impl AttentionScorer for ScaledDotProductAttention {
         //       layer is working first...
 
         // Calculate attention scores.
+        let query = query.contiguous().context(AttentionScoresSnafu)?;
         let mut attn_scores = key
-            .transpose(3, 2)
-            .and_then(|xs| query.broadcast_matmul(&xs))
+            .contiguous()
+            .and_then(|key| key.transpose(3, 2))
+            .and_then(|key| query.broadcast_matmul(&key))
             .context(AttentionScoresSnafu)?;
 
         let model_width = key.dim(3).context(TemperatureSnafu)?;
@@ -128,8 +130,9 @@ impl AttentionScorer for ScaledDotProductAttention {
 
         // Apply attention weights.
         let attn_weights = softmax(&attn_scores, 3).context(AttentionWeightSnafu)?;
-        attn_weights
-            .broadcast_matmul(value)
+        value
+            .contiguous()
+            .and_then(|value| attn_weights.broadcast_matmul(&value))
             .and_then(|xs| self.dropout.forward_t(&xs, train))
             .context(AttentionWeightSnafu)
             .boxed()

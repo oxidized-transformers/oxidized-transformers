@@ -1,3 +1,6 @@
+mod bert;
+pub use bert::BertEncoder;
+
 mod gpt_neox;
 pub use gpt_neox::{GPTNeoXCausalLM, GPTNeoXDecoder};
 
