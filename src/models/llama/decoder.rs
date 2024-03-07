@@ -143,7 +143,7 @@ impl FromHF for LlamaDecoder {
 
 #[cfg(test)]
 mod tests {
-    use candle_core::{DType, Device, Tensor};
+    use candle_core::{DType, Device};
     use ndarray::array;
     use snafu::{report, FromString, ResultExt, Whatever};
 
@@ -152,42 +152,19 @@ mod tests {
     use crate::layers::attention::AttentionMask;
     use crate::models::hf::FromHFHub;
     use crate::models::llama::LlamaDecoder;
-    use crate::util::tests::{assert_tensor_eq, PseudoRandomReduction};
-
-    fn sample_inputs() -> Result<(Tensor, Tensor), Whatever> {
-        let input = Tensor::arange(0i64, 24, &Device::Cpu)
-            .and_then(|t| t.reshape((3, 8)))
-            .with_whatever_context(|_| "Cannot create input tensor")?;
-
-        let mask = Tensor::from_slice(
-            &[
-                1u32, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 1, 1, 1, 0, 1, 1, 0, 0, 1, 1, 0,
-            ],
-            (3, 8),
-            &Device::Cpu,
-        )
-        .with_whatever_context(|_| "Cannot create attention mask tensor")?;
-
-        Ok((input, mask))
-    }
+    use crate::util::tests::{assert_tensor_eq, sample_transformer_inputs, PseudoRandomReduction};
 
     #[test]
     #[report]
-    fn llama_decoder_emits_correct_output() -> Result<(), Whatever> {
+    fn llama_decoder_gives_correct_output() -> Result<(), Whatever> {
         let decoder =
             LlamaDecoder::from_hf_hub("explosion-testing/llama2-kv-sharing", None, Device::Cpu)
                 .with_whatever_context(|_| "Cannot load model")?;
 
-        let (input, mask) = sample_inputs()?;
+        let (input, mask) = sample_transformer_inputs()?;
 
         let output = decoder
-            .forward_t(
-                &input,
-                &AttentionMask::new(mask).whatever_context("Cannot build attention mask")?,
-                &mut KeyValueCache::no_cache(5),
-                None,
-                false,
-            )
+            .forward_t(&input, &mask, &mut KeyValueCache::no_cache(5), None, false)
             .map_err(|e| Whatever::with_source(e, "Cannot decode input".to_string()))?;
 
         let last_output = output.layer_outputs().last().unwrap();
@@ -214,13 +191,14 @@ mod tests {
             LlamaDecoder::from_hf_hub("explosion-testing/llama2-kv-sharing", None, Device::Cpu)
                 .with_whatever_context(|_| "Cannot load model")?;
 
-        let (input, mask) = sample_inputs()?;
+        let (input, mask) = sample_transformer_inputs()?;
 
         let mut cache =
             KeyValueCache::cache(input.shape().dims()[0], 64, 1, 5, DType::F32, &Device::Cpu)
                 .whatever_context("Cannot create cache")?;
         let attention_mask = AttentionMask::new(
-            mask.narrow(1, 0, 7)
+            mask.bool_mask()
+                .narrow(1, 0, 7)
                 .whatever_context("Cannot slice attention mask")?,
         )
         .whatever_context("Cannot build attention mask")?;
@@ -240,7 +218,8 @@ mod tests {
         let attention_mask = attention_mask
             .extend(
                 &AttentionMask::new(
-                    mask.narrow(1, 7, 1)
+                    mask.bool_mask()
+                        .narrow(1, 7, 1)
                         .whatever_context("Cannot slice attention mask")?,
                 )
                 .whatever_context("Cannot build attention mask")?,

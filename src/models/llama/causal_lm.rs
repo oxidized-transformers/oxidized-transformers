@@ -50,33 +50,15 @@ impl FromHF for LlamaCausalLM {
 
 #[cfg(test)]
 mod tests {
-    use candle_core::{Device, Tensor};
+    use candle_core::Device;
     use ndarray::array;
     use snafu::{report, FromString, ResultExt, Whatever};
 
     use crate::architectures::CausalLM;
     use crate::kv_cache::KeyValueCache;
-    use crate::layers::attention::AttentionMask;
     use crate::models::hf::FromHFHub;
     use crate::models::llama::causal_lm::LlamaCausalLM;
-    use crate::util::tests::{assert_tensor_eq, PseudoRandomReduction};
-
-    fn sample_inputs() -> Result<(Tensor, Tensor), Whatever> {
-        let input = Tensor::arange(0i64, 24, &Device::Cpu)
-            .and_then(|t| t.reshape((3, 8)))
-            .with_whatever_context(|_| "Cannot create input tensor")?;
-
-        let mask = Tensor::from_slice(
-            &[
-                1u32, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 1, 1, 1, 0, 1, 1, 0, 0, 1, 1, 0,
-            ],
-            (3, 8),
-            &Device::Cpu,
-        )
-        .with_whatever_context(|_| "Cannot create attention mask tensor")?;
-
-        Ok((input, mask))
-    }
+    use crate::util::tests::{assert_tensor_eq, sample_transformer_inputs, PseudoRandomReduction};
 
     #[test]
     #[report]
@@ -85,16 +67,10 @@ mod tests {
             LlamaCausalLM::from_hf_hub("explosion-testing/llama2-kv-sharing", None, Device::Cpu)
                 .whatever_context("Cannot load model")?;
 
-        let (input, mask) = sample_inputs()?;
+        let (input, mask) = sample_transformer_inputs()?;
 
         let output = causal_lm
-            .forward_t(
-                &input,
-                &AttentionMask::new(mask).unwrap(),
-                &mut KeyValueCache::no_cache(5),
-                None,
-                false,
-            )
+            .forward_t(&input, &mask, &mut KeyValueCache::no_cache(5), None, false)
             .map_err(|e| Whatever::with_source(e, "Cannot decode input".to_string()))?;
 
         assert_tensor_eq::<f32>(
