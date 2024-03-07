@@ -106,6 +106,7 @@ impl AttentionScorer for ScaledDotProductAttention {
         //       layer is working first...
 
         // Calculate attention scores.
+        let query = query.contiguous().context(AttentionScoresSnafu)?;
         let mut attn_scores = key
             .contiguous()
             .and_then(|key| key.transpose(3, 2))
