@@ -47,13 +47,23 @@ impl LayerKeyValueCache {
     ) -> Result<Self, LayerKeyValueCacheError> {
         Ok(LayerKeyValueCache(LayerKeyValueCacheEnum::Cache {
             key: Tensor::zeros(
-                (batch_size, n_key_value_heads, 0, hidden_width),
+                (
+                    batch_size,
+                    n_key_value_heads,
+                    0,
+                    hidden_width / n_key_value_heads,
+                ),
                 dtype,
                 device,
             )
             .context(CreateEmptyKeySnafu)?,
             value: Tensor::zeros(
-                (batch_size, n_key_value_heads, 0, hidden_width),
+                (
+                    batch_size,
+                    n_key_value_heads,
+                    0,
+                    hidden_width / n_key_value_heads,
+                ),
                 dtype,
                 device,
             )

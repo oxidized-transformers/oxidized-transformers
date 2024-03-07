@@ -10,7 +10,9 @@ pub(crate) mod tests {
     use ndarray::{ArrayBase, ArrayD, DataOwned, Dimension};
     use rand_core::RngCore;
     use rand_pcg::Pcg32;
-    use snafu::{ResultExt, Snafu};
+    use snafu::{ResultExt, Snafu, Whatever};
+
+    use crate::layers::attention::AttentionMask;
 
     // Like TryInto, but we need our own trait so that we can implement it
     // for external types.
@@ -135,5 +137,26 @@ pub(crate) mod tests {
                 .squeeze(D::Minus1)
                 .context(ShapeSnafu)
         }
+    }
+
+    /// Sample transformer inputs used for most tests.
+    pub fn sample_transformer_inputs() -> Result<(Tensor, AttentionMask), Whatever> {
+        let input = Tensor::arange(0i64, 24, &Device::Cpu)
+            .and_then(|t| t.reshape((3, 8)))
+            .whatever_context("Cannot create input tensor")?;
+
+        let mask = Tensor::from_slice(
+            &[
+                1u32, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 1, 1, 1, 0, 1, 1, 0, 0, 1, 1, 0,
+            ],
+            (3, 8),
+            &Device::Cpu,
+        )
+        .whatever_context("Cannot create attention mask tensor")?;
+
+        Ok((
+            input,
+            AttentionMask::new(mask).whatever_context("Cannot create attention mask")?,
+        ))
     }
 }

@@ -157,7 +157,7 @@ impl FromHF for GPTNeoXDecoder {
 
 #[cfg(test)]
 mod tests {
-    use candle_core::{Device, Tensor};
+    use candle_core::{DType, Device};
     use ndarray::array;
     use snafu::{report, FromString, ResultExt, Whatever};
 
@@ -166,11 +166,11 @@ mod tests {
     use crate::layers::attention::AttentionMask;
     use crate::models::gpt_neox::GPTNeoXDecoder;
     use crate::models::hf::FromHFHub;
-    use crate::util::tests::assert_tensor_eq;
+    use crate::util::tests::{assert_tensor_eq, sample_transformer_inputs, PseudoRandomReduction};
 
     #[test]
     #[report]
-    fn gpt_neox_decoder() -> Result<(), Whatever> {
+    fn gpt_neox_decoder_gives_correct_output() -> Result<(), Whatever> {
         let decoder = GPTNeoXDecoder::from_hf_hub(
             "trl-internal-testing/tiny-random-GPTNeoXForCausalLM-safetensors-sharded",
             None,
@@ -178,39 +178,93 @@ mod tests {
         )
         .with_whatever_context(|_| "Cannot load model")?;
 
-        let input = Tensor::arange(0i64, 24, &Device::Cpu)
-            .and_then(|t| t.reshape((3, 8)))
-            .with_whatever_context(|_| "Cannot create input tensor")?;
-
-        let mask = Tensor::from_slice(
-            &[
-                1u32, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 1, 1, 1, 0, 1, 1, 0, 0, 1, 1, 0,
-            ],
-            (3, 8),
-            &Device::Cpu,
-        )
-        .with_whatever_context(|_| "Cannot create attention mask tensor")?;
-        let mask =
-            AttentionMask::new(mask).with_whatever_context(|_| "Cannot create attention mask")?;
+        let (input, mask) = sample_transformer_inputs()?;
 
         let output = decoder
             .forward_t(&input, &mask, &mut KeyValueCache::no_cache(5), None, false)
             .map_err(|e| Whatever::with_source(e, "Cannot decode input".to_string()))?;
 
-        let states_max = output
-            .layer_outputs()
-            .last()
-            .unwrap()
-            .max(2)
-            .with_whatever_context(|_| "Cannot sum model outputs")?;
+        let last_output = output.layer_outputs().last().unwrap();
 
         assert_tensor_eq::<f32>(
-            states_max,
+            last_output
+                .pseudo_random_reduction()
+                .whatever_context("Cannot apply reduction using random vector")?,
             array![
-                [1.7486, 1.6267, 2.1251, 1.6062, 2.2738, 2.3018, 1.8215, 2.1293],
-                [2.8857, 2.6930, 2.2695, 2.8436, 2.4052, 2.1549, 1.4530, 2.4267],
-                [2.1043, 2.5052, 2.3536, 2.5745, 3.0016, 2.0045, 2.1793, 1.7757]
+                [2.8711, 2.2852, 2.6235, 3.7102, 1.3372, 2.9834, 2.7712, 5.1699],
+                [1.0860, 5.2414, 1.7125, 1.5052, 0.8727, 3.4021, 5.8198, -0.8003],
+                [-3.6789, -1.5767, -4.2494, 0.3412, -4.3807, -3.3196, -3.2535, 0.5096]
             ],
+            1e-4,
+        );
+
+        Ok(())
+    }
+
+    #[test]
+    #[report]
+    fn gpt_neox_decoder_gives_correct_output_with_cache() -> Result<(), Whatever> {
+        let decoder = GPTNeoXDecoder::from_hf_hub(
+            "trl-internal-testing/tiny-random-GPTNeoXForCausalLM-safetensors-sharded",
+            None,
+            Device::Cpu,
+        )
+        .with_whatever_context(|_| "Cannot load model")?;
+
+        let (input, mask) = sample_transformer_inputs()?;
+
+        let mut cache =
+            KeyValueCache::cache(input.shape().dims()[0], 32, 4, 5, DType::F32, &Device::Cpu)
+                .whatever_context("Cannot create cache")?;
+        let attention_mask = AttentionMask::new(
+            mask.bool_mask()
+                .narrow(1, 0, 7)
+                .whatever_context("Cannot slice attention mask")?,
+        )
+        .whatever_context("Cannot build attention mask")?;
+
+        let _ = decoder
+            .forward_t(
+                &input
+                    .narrow(1, 0, 7)
+                    .whatever_context("Cannot slice input")?,
+                &attention_mask,
+                &mut cache,
+                None,
+                false,
+            )
+            .map_err(|e| Whatever::with_source(e, "Cannot decode input".to_string()))?;
+
+        let attention_mask = attention_mask
+            .extend(
+                &AttentionMask::new(
+                    mask.bool_mask()
+                        .narrow(1, 7, 1)
+                        .whatever_context("Cannot slice attention mask")?,
+                )
+                .whatever_context("Cannot build attention mask")?,
+            )
+            .whatever_context("Cannot extend attention mask")?;
+
+        let output = decoder
+            .forward_t(
+                &input
+                    .narrow(1, 7, 1)
+                    .whatever_context("Cannot slice input")?,
+                &attention_mask,
+                &mut cache,
+                None,
+                false,
+            )
+            .map_err(|e| Whatever::with_source(e, "Cannot decode input".to_string()))?;
+
+        let last_output = output.layer_outputs().last().unwrap();
+
+        assert_tensor_eq::<f32>(
+            last_output
+                .pseudo_random_reduction()
+                .whatever_context("Cannot apply reduction using random vector")?,
+            array![[5.1699], [-0.8003], [0.5096]],
             1e-4,
         );
 

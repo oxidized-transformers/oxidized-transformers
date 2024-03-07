@@ -47,33 +47,15 @@ impl FromHF for GPTNeoXCausalLM {
 
 #[cfg(test)]
 mod tests {
-    use candle_core::{Device, Tensor};
+    use candle_core::Device;
     use ndarray::array;
     use snafu::{report, FromString, ResultExt, Whatever};
 
     use crate::architectures::CausalLM;
     use crate::kv_cache::KeyValueCache;
-    use crate::layers::attention::AttentionMask;
     use crate::models::gpt_neox::causal_lm::GPTNeoXCausalLM;
     use crate::models::hf::FromHFHub;
-    use crate::util::tests::assert_tensor_eq;
-
-    fn sample_inputs() -> Result<(Tensor, Tensor), Whatever> {
-        let input = Tensor::arange(0i64, 24, &Device::Cpu)
-            .and_then(|t| t.reshape((3, 8)))
-            .with_whatever_context(|_| "Cannot create input tensor")?;
-
-        let mask = Tensor::from_slice(
-            &[
-                1u32, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 1, 1, 1, 0, 1, 1, 0, 0, 1, 1, 0,
-            ],
-            (3, 8),
-            &Device::Cpu,
-        )
-        .with_whatever_context(|_| "Cannot create attention mask tensor")?;
-
-        Ok((input, mask))
-    }
+    use crate::util::tests::{assert_tensor_eq, sample_transformer_inputs};
 
     #[test]
     #[report]
@@ -85,16 +67,10 @@ mod tests {
         )
         .whatever_context("Cannot load model")?;
 
-        let (input, mask) = sample_inputs()?;
+        let (input, mask) = sample_transformer_inputs()?;
 
         let output = causal_lm
-            .forward_t(
-                &input,
-                &AttentionMask::new(mask).unwrap(),
-                &mut KeyValueCache::no_cache(5),
-                None,
-                false,
-            )
+            .forward_t(&input, &mask, &mut KeyValueCache::no_cache(5), None, false)
             .map_err(|e| Whatever::with_source(e, "Cannot decode input".to_string()))?;
 
         let logits = output.logits();
