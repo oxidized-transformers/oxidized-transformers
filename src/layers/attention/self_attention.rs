@@ -462,16 +462,13 @@ impl SelfAttention {
         let (_, _, _, all_heads_size) = proj.shape().dims4().context(QkvSnafu)?;
         let head_size = all_heads_size / 3;
 
-        // Similar to chunk, but avoid intermediate Vec. Needs to be contiguous or
-        // matrix multiplication fails later.
+        // Similar to chunk, but avoid intermediate Vec.
         let query = proj.narrow(3, 0, head_size).context(QkvChunkSnafu)?;
         let key = proj
             .narrow(3, head_size, head_size)
             .context(QkvChunkSnafu)?;
         let value = proj
             .narrow(3, 2 * head_size, head_size)
-            // Needs to be contiguous to avoid matmul stride error.
-            .and_then(|xs| xs.contiguous())
             .context(QkvChunkSnafu)?;
 
         Ok((query, key, value))
