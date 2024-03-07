@@ -1,3 +1,6 @@
+mod albert;
+pub use albert::{AlbertEncoder, AlbertEncoderConfig};
+
 mod bert;
 pub use bert::BertEncoder;
 
