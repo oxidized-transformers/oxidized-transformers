@@ -143,7 +143,7 @@ impl FromHF for LlamaDecoder {
 
 #[cfg(test)]
 mod tests {
-    use candle_core::{DType, Device};
+    use candle_core::Device;
     use ndarray::array;
     use snafu::{report, FromString, ResultExt, Whatever};
 
@@ -164,7 +164,7 @@ mod tests {
         let (input, mask) = sample_transformer_inputs()?;
 
         let output = decoder
-            .forward_t(&input, &mask, &mut KeyValueCache::no_cache(5), None, false)
+            .forward_t(&input, &mask, &mut KeyValueCache::no_cache(), None, false)
             .map_err(|e| Whatever::with_source(e, "Cannot decode input".to_string()))?;
 
         let last_output = output.layer_outputs().last().unwrap();
@@ -193,9 +193,7 @@ mod tests {
 
         let (input, mask) = sample_transformer_inputs()?;
 
-        let mut cache =
-            KeyValueCache::cache(input.shape().dims()[0], 64, 1, 5, DType::F32, &Device::Cpu)
-                .whatever_context("Cannot create cache")?;
+        let mut cache = KeyValueCache::cache();
         let attention_mask = AttentionMask::new(
             mask.bool_mask()
                 .narrow(1, 0, 7)
