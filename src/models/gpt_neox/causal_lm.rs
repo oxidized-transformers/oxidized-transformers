@@ -70,7 +70,7 @@ mod tests {
         let (input, mask) = sample_transformer_inputs()?;
 
         let output = causal_lm
-            .forward_t(&input, &mask, &mut KeyValueCache::no_cache(5), None, false)
+            .forward_t(&input, &mask, &mut KeyValueCache::no_cache(), None, false)
             .map_err(|e| Whatever::with_source(e, "Cannot decode input".to_string()))?;
 
         let logits = output.logits();

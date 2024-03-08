@@ -400,8 +400,7 @@ mod tests {
                 1e-4,
             );
 
-            let mut cache = LayerKeyValueCache::cache(1, 8, 1, DType::F32, &Device::Cpu)
-                .whatever_context("Cannot create cache")?;
+            let mut cache = LayerKeyValueCache::empty();
             cache
                 .update(
                     &Tensor::zeros((1, 1, 16, 8), DType::F32, &Device::Cpu).unwrap(),

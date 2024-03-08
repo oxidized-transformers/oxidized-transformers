@@ -1,18 +1,12 @@
-use std::iter::repeat_with;
+use std::collections::HashMap;
 use std::ops::{Index, IndexMut};
 
-use candle_core::{DType, Device, Tensor};
+use candle_core::Tensor;
 use snafu::{ResultExt, Snafu};
 
 /// Errors in layer cache operations.
 #[derive(Debug, Snafu)]
 pub enum LayerKeyValueCacheError {
-    #[snafu(display("Failed to create empty key"))]
-    CreateEmptyKey { source: candle_core::Error },
-
-    #[snafu(display("Failed to create empty value"))]
-    CreateEmptyValue { source: candle_core::Error },
-
     #[snafu(display("Failed to extend key"))]
     ExtendKey { source: candle_core::Error },
 
@@ -22,8 +16,8 @@ pub enum LayerKeyValueCacheError {
 
 /// Internal representation of `LayerKeyValueCache`.
 enum LayerKeyValueCacheEnum {
+    Empty,
     Cache { key: Tensor, value: Tensor },
-
     NoCache,
 }
 
@@ -32,43 +26,8 @@ pub struct LayerKeyValueCache(LayerKeyValueCacheEnum);
 
 impl LayerKeyValueCache {
     /// Create an empty layer cache.
-    ///
-    /// * `batch_size` - Batch size.
-    /// * `hidden_width` - Hidden width.
-    /// * `n_key_value_heads` - Number of key-value heads.
-    /// * `dtype` - Cache data type.
-    /// * `device` - Device to store the cache on.
-    pub fn cache(
-        batch_size: usize,
-        hidden_width: usize,
-        n_key_value_heads: usize,
-        dtype: DType,
-        device: &Device,
-    ) -> Result<Self, LayerKeyValueCacheError> {
-        Ok(LayerKeyValueCache(LayerKeyValueCacheEnum::Cache {
-            key: Tensor::zeros(
-                (
-                    batch_size,
-                    n_key_value_heads,
-                    0,
-                    hidden_width / n_key_value_heads,
-                ),
-                dtype,
-                device,
-            )
-            .context(CreateEmptyKeySnafu)?,
-            value: Tensor::zeros(
-                (
-                    batch_size,
-                    n_key_value_heads,
-                    0,
-                    hidden_width / n_key_value_heads,
-                ),
-                dtype,
-                device,
-            )
-            .context(CreateEmptyValueSnafu)?,
-        }))
+    pub fn empty() -> LayerKeyValueCache {
+        LayerKeyValueCache(LayerKeyValueCacheEnum::Empty)
     }
 
     /// Create a no-op cache.
@@ -81,17 +40,21 @@ impl LayerKeyValueCache {
 
     /// Get the cached key.
     pub fn key(&self) -> Option<&Tensor> {
+        use LayerKeyValueCacheEnum::*;
         match &self.0 {
-            LayerKeyValueCacheEnum::Cache { key, .. } => Some(key),
-            LayerKeyValueCacheEnum::NoCache => None,
+            Cache { key, .. } => Some(key),
+            Empty => None,
+            NoCache => None,
         }
     }
 
     /// Get the cached value.
     pub fn value(&self) -> Option<&Tensor> {
+        use LayerKeyValueCacheEnum::*;
         match &self.0 {
-            LayerKeyValueCacheEnum::Cache { value, .. } => Some(value),
-            LayerKeyValueCacheEnum::NoCache => None,
+            Cache { value, .. } => Some(value),
+            Empty => None,
+            NoCache => None,
         }
     }
 
@@ -106,40 +69,35 @@ impl LayerKeyValueCache {
         new_key: &Tensor,
         new_value: &Tensor,
     ) -> Result<(), LayerKeyValueCacheError> {
+        use LayerKeyValueCacheEnum::*;
         match &mut self.0 {
-            LayerKeyValueCacheEnum::Cache { key, value } => {
+            Cache { key, value } => {
                 *key = Tensor::cat(&[&*key, new_key], 2).context(ExtendKeySnafu)?;
                 *value = Tensor::cat(&[&*value, new_value], 2).context(ExtendKeySnafu)?;
             }
-            LayerKeyValueCacheEnum::NoCache => (),
+            Empty => {
+                self.0 = Cache {
+                    key: new_key.clone(),
+                    value: new_value.clone(),
+                }
+            }
+
+            NoCache => (),
         }
 
         Ok(())
     }
 }
 
-/// Key-value cache errors.
-#[derive(Debug, Snafu)]
-pub enum KeyValueCacheError {
-    #[snafu(display("Failed to create layer cache"))]
-    CreateLayerKeyValueCache { source: LayerKeyValueCacheError },
-}
-
 /// Internal representation of `KeyValueCache`.
 enum KeyValueCacheEnum {
     #[allow(private_interfaces)]
     Cache {
-        layer_caches: Vec<LayerKeyValueCache>,
+        layer_caches: HashMap<usize, LayerKeyValueCache>,
     },
 
     #[allow(private_interfaces)]
-    NoCache {
-        stub: LayerKeyValueCache,
-
-        // Note: it's a bit nonsensical to have this, but we need it to
-        // return the number of layers in the cache uniformly.
-        n_layers: usize,
-    },
+    NoCache { stub: LayerKeyValueCache },
 }
 
 /// Cache type for layers that cache keys and values.
@@ -147,47 +105,19 @@ pub struct KeyValueCache(KeyValueCacheEnum);
 
 impl KeyValueCache {
     /// Create a key-value cache.
-    ///
-    /// * `batch_size` - Batch size.
-    /// * `hidden_width` - Hidden width.
-    /// * `n_key_value_heads` - Number of key-value heads.
-    /// * `n_layers` - Number of hidden layers.
-    /// * `dtype` - Cache data type.
-    /// * `device` - Device to store the cache on.
-    pub fn cache(
-        batch_size: usize,
-        hidden_width: usize,
-        n_key_value_heads: usize,
-        n_layers: usize,
-        dtype: DType,
-        device: &Device,
-    ) -> Result<Self, KeyValueCacheError> {
-        let layer_caches = repeat_with(|| {
-            LayerKeyValueCache::cache(batch_size, hidden_width, n_key_value_heads, dtype, device)
+    pub fn cache() -> KeyValueCache {
+        Self(KeyValueCacheEnum::Cache {
+            layer_caches: HashMap::new(),
         })
-        .take(n_layers)
-        .collect::<Result<Vec<_>, _>>()
-        .context(CreateLayerKeyValueCacheSnafu)?;
-
-        Ok(Self(KeyValueCacheEnum::Cache { layer_caches }))
-    }
-
-    /// Get the number of layers in the cache.
-    pub fn n_layers(&self) -> usize {
-        match &self.0 {
-            KeyValueCacheEnum::Cache { layer_caches } => layer_caches.len(),
-            KeyValueCacheEnum::NoCache { n_layers, .. } => *n_layers,
-        }
     }
 
     /// Create a no-op cache.
     ///
     /// This type of cache does not store anything. Updates to the cache are
     /// discarded.
-    pub fn no_cache(n_layers: usize) -> Self {
+    pub fn no_cache() -> Self {
         Self(KeyValueCacheEnum::NoCache {
             stub: LayerKeyValueCache::no_cache(),
-            n_layers,
         })
     }
 }
@@ -197,7 +127,7 @@ impl Index<usize> for KeyValueCache {
 
     fn index(&self, index: usize) -> &Self::Output {
         match &self.0 {
-            KeyValueCacheEnum::Cache { layer_caches } => &layer_caches[index],
+            KeyValueCacheEnum::Cache { layer_caches } => &layer_caches[&index],
             KeyValueCacheEnum::NoCache { stub, .. } => stub,
         }
     }
@@ -206,7 +136,9 @@ impl Index<usize> for KeyValueCache {
 impl IndexMut<usize> for KeyValueCache {
     fn index_mut(&mut self, index: usize) -> &mut Self::Output {
         match &mut self.0 {
-            KeyValueCacheEnum::Cache { layer_caches } => &mut layer_caches[index],
+            KeyValueCacheEnum::Cache { layer_caches } => layer_caches
+                .entry(index)
+                .or_insert(LayerKeyValueCache::empty()),
             KeyValueCacheEnum::NoCache { stub, .. } => stub,
         }
     }
