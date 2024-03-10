@@ -1,0 +1,24 @@
+[package]
+name = "oxidized-transformers"
+description = "Transformers library (not functional yet)"
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+homepage = "https://github.com/danieldk/oxidized-transformers"
+
+[dependencies]
+candle-core = { workspace = true }
+candle-nn = { workspace = true }
+hf-hub = { workspace = true }
+regex = { workspace = true }
+snafu = { workspace = true }
+serde = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true }
+tokenizers = { workspace = true, features = ["http"] }
+
+[dev-dependencies]
+approx = { workspace = true }
+rstest = { workspace = true }
+ndarray = { workspace = true, features = ["approx-0_5"] }
+rand_pcg = { workspace = true }
+rand_core = { workspace = true }
