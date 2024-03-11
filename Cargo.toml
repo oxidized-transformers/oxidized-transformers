@@ -1,8 +1,17 @@
 [workspace]
 members = [
-    "oxidized-transformers"
+    "oxidized-transformers",
+    "oxidized-transformers-pyo3"
 ]
 resolver = "2"
+
+[workspace.package]
+description = "Transformers library (not functional yet)"
+version = "0.1.0"
+edition = "2021"
+homepage = "https://github.com/oxidized-transformers/oxidized-transformers"
+license = "MIT"
+repository = "https://github.com/oxidized-transformers/oxidized-transformers"
 
 [workspace.dependencies]
 approx = "0.5"

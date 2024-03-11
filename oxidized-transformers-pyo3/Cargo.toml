@@ -1,0 +1,15 @@
+[package]
+name = "oxidized-transformers-pyo3"
+description.workspace = true
+edition.workspace = true
+homepage.workspace = true
+license.workspace = true
+repository.workspace = true
+version.workspace = true
+
+[lib]
+name = "oxidized_transformers"
+crate-type = ["cdylib"]
+
+[dependencies]
+pyo3 = { version = "0.21.0-beta.0", features = ["extension-module", "abi3-py38"] }
