@@ -216,7 +216,7 @@ impl RotaryEmbeddings {
                 let positions_flat = positions.flatten_all().context(SliceCacheSnafu)?;
                 let max_len = positions_flat
                     .max(0)
-                    .and_then(|xs| xs.to_scalar::<i64>())
+                    .and_then(|xs| xs.to_scalar::<u32>())
                     .context(SliceCacheSnafu)? as usize
                     + 1;
 

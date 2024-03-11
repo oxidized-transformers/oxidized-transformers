@@ -146,41 +146,24 @@ impl FromHF for BertEncoder {
 
 #[cfg(test)]
 mod tests {
-    use candle_core::Device;
     use ndarray::array;
-    use snafu::{report, FromString, ResultExt, Whatever};
+    use snafu::{report, ResultExt, Whatever};
 
-    use crate::architectures::{Encoder, LayerOutputs};
     use crate::models::bert::BertEncoder;
-    use crate::models::hf::FromHFHub;
-    use crate::util::tests::{assert_tensor_eq, sample_transformer_inputs, PseudoRandomReduction};
+    use crate::models::util::tests::check_encoder;
 
     #[test]
     #[report]
     fn bert_encoder_emits_correct_output() -> Result<(), Whatever> {
-        let encoder = BertEncoder::from_hf_hub("explosion-testing/bert-test", None, Device::Cpu)
-            .with_whatever_context(|_| "Cannot load model")?;
-
-        let (input, mask) = sample_transformer_inputs()?;
-
-        let output = encoder
-            .forward_t(&input, &mask, None, None, false)
-            .map_err(|e| Whatever::with_source(e, "Cannot encode input".to_string()))?;
-
-        let last_output = output.layer_outputs().last().unwrap();
-
-        assert_tensor_eq::<f32>(
-            last_output
-                .pseudo_random_reduction()
-                .whatever_context("Cannot apply reduction using random vector")?,
+        check_encoder::<BertEncoder, _>(
+            "explosion-testing/bert-test",
+            None,
             array![
                 [6.6632, 4.4528, 8.7430, 3.5811, 7.8127, 3.0751, 1.0560, 2.6171],
                 [5.9245, 4.3979, 5.7063, 5.2123, 5.0856, 2.5916, 0.5269, 5.9339],
                 [7.1707, 6.5958, 3.5610, 3.3650, 6.1192, 6.3981, 2.1112, 7.8207]
             ],
-            1e-4,
-        );
-
-        Ok(())
+        )
+        .whatever_context("Cannot check encoder")
     }
 }

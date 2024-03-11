@@ -566,6 +566,7 @@ impl SelfAttentionMask {
         // is ok for masking.
         let blocked_value = Tensor::try_from(f32::MIN)
             .and_then(|xs| xs.broadcast_as(input.shape()))
+            .and_then(|xs| xs.to_device(input.device()))
             .context(ApplyLogitsMaskSnafu)?;
         self.bool_mask
             .broadcast_as(input.shape())
@@ -631,7 +632,7 @@ impl CausalMask for SelfAttentionMask {
         // the key length.
         ensure!(query_len <= key_len, QueryLenSnafu { key_len, query_len });
 
-        let causal_mask = Tensor::tril2(key_len, DType::U32, key.device())
+        let causal_mask = Tensor::tril2(key_len, DType::U8, key.device())
             .and_then(|mask| mask.reshape((1, 1, key_len, key_len)))
             .context(CreateMaskSnafu)?;
         Ok(Self {

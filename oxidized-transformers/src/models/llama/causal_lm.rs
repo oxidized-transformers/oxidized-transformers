@@ -50,42 +50,23 @@ impl FromHF for LlamaCausalLM {
 
 #[cfg(test)]
 mod tests {
-    use candle_core::Device;
     use ndarray::array;
-    use snafu::{report, FromString, ResultExt, Whatever};
+    use snafu::{report, Whatever};
 
-    use crate::architectures::CausalLM;
-    use crate::kv_cache::KeyValueCache;
-    use crate::models::hf::FromHFHub;
     use crate::models::llama::causal_lm::LlamaCausalLM;
-    use crate::util::tests::{assert_tensor_eq, sample_transformer_inputs, PseudoRandomReduction};
+    use crate::models::util::tests::check_causal_lm;
 
     #[test]
     #[report]
     fn llama_causal_lm_emits_correct_output() -> Result<(), Whatever> {
-        let causal_lm =
-            LlamaCausalLM::from_hf_hub("explosion-testing/llama2-kv-sharing", None, Device::Cpu)
-                .whatever_context("Cannot load model")?;
-
-        let (input, mask) = sample_transformer_inputs()?;
-
-        let output = causal_lm
-            .forward_t(&input, &mask, &mut KeyValueCache::no_cache(), None, false)
-            .map_err(|e| Whatever::with_source(e, "Cannot decode input".to_string()))?;
-
-        assert_tensor_eq::<f32>(
-            output
-                .logits()
-                .pseudo_random_reduction()
-                .whatever_context("Cannot apply reduction using random vector")?,
+        check_causal_lm::<LlamaCausalLM, _>(
+            "explosion-testing/llama2-kv-sharing",
+            None,
             array![
                 [0.0000, -0.7422, 3.9272, 2.4643, 1.2032, -0.2746, 0.0612, 2.6404],
                 [-1.6657, -1.5350, -0.9877, 0.1828, 0.2311, 0.7174, 0.4477, -0.4943],
                 [-1.4341, -2.5877, -1.4347, -1.1339, -1.8117, -0.2561, -0.6859, -2.5824]
             ],
-            1e-4,
-        );
-
-        Ok(())
+        )
     }
 }

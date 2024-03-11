@@ -254,7 +254,7 @@ impl TransformerEmbeddings {
     /// Get position identifiers _[0..seq_len)_.
     fn get_positions(x: &Tensor) -> Result<Tensor, TransformerEmbeddingsError> {
         let (batch_size, seq_len) = x.shape().dims2().context(PositionEmbeddingsSnafu)?;
-        Tensor::arange(0, seq_len as i64, x.device())
+        Tensor::arange(0, seq_len as u32, x.device())
             .and_then(|xs| xs.reshape((1, seq_len)))
             .and_then(|xs| xs.repeat(&[batch_size, 1]))
             .context(PositionEmbeddingsSnafu)

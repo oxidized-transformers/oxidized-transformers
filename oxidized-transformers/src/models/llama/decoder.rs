@@ -143,109 +143,33 @@ impl FromHF for LlamaDecoder {
 
 #[cfg(test)]
 mod tests {
-    use candle_core::Device;
     use ndarray::array;
-    use snafu::{report, FromString, ResultExt, Whatever};
+    use snafu::{report, ResultExt, Whatever};
 
-    use crate::architectures::{Decoder, LayerOutputs};
-    use crate::kv_cache::KeyValueCache;
-    use crate::layers::attention::AttentionMask;
-    use crate::models::hf::FromHFHub;
     use crate::models::llama::LlamaDecoder;
-    use crate::util::tests::{assert_tensor_eq, sample_transformer_inputs, PseudoRandomReduction};
+    use crate::models::util::tests::{check_decoder, check_decoder_with_cache};
 
-    #[test]
     #[report]
     fn llama_decoder_gives_correct_output() -> Result<(), Whatever> {
-        let decoder =
-            LlamaDecoder::from_hf_hub("explosion-testing/llama2-kv-sharing", None, Device::Cpu)
-                .with_whatever_context(|_| "Cannot load model")?;
-
-        let (input, mask) = sample_transformer_inputs()?;
-
-        let output = decoder
-            .forward_t(&input, &mask, &mut KeyValueCache::no_cache(), None, false)
-            .map_err(|e| Whatever::with_source(e, "Cannot decode input".to_string()))?;
-
-        let last_output = output.layer_outputs().last().unwrap();
-
-        assert_tensor_eq::<f32>(
-            last_output
-                .pseudo_random_reduction()
-                .whatever_context("Cannot apply reduction using random vector")?,
+        check_decoder::<LlamaDecoder, _>(
+            "explosion-testing/llama2-kv-sharing",
+            None,
             array![
                 [0.0000, -0.7430, -5.4662, -6.5113, -7.6470, -12.3254, -7.7909, -7.3655],
                 [-9.9933, -10.4256, -10.3813, -12.0933, -12.3758, -17.6279, -17.4024, -11.2087],
                 [-1.7355, 1.8150, 2.2124, 1.4387, 1.2247, 1.7853, -0.4188, -1.9727]
             ],
-            1e-4,
-        );
-
-        Ok(())
+        )
+        .whatever_context("Cannot check decoder")
     }
 
     #[test]
     #[report]
     fn llama_decoder_give_correct_output_with_cache() -> Result<(), Whatever> {
-        let decoder =
-            LlamaDecoder::from_hf_hub("explosion-testing/llama2-kv-sharing", None, Device::Cpu)
-                .with_whatever_context(|_| "Cannot load model")?;
-
-        let (input, mask) = sample_transformer_inputs()?;
-
-        let mut cache = KeyValueCache::cache();
-        let attention_mask = AttentionMask::new(
-            mask.bool_mask()
-                .narrow(1, 0, 7)
-                .whatever_context("Cannot slice attention mask")?,
-        )
-        .whatever_context("Cannot build attention mask")?;
-
-        let _ = decoder
-            .forward_t(
-                &input
-                    .narrow(1, 0, 7)
-                    .whatever_context("Cannot slice input")?,
-                &attention_mask,
-                &mut cache,
-                None,
-                false,
-            )
-            .map_err(|e| Whatever::with_source(e, "Cannot decode input".to_string()))?;
-
-        let attention_mask = attention_mask
-            .extend(
-                &AttentionMask::new(
-                    mask.bool_mask()
-                        .narrow(1, 7, 1)
-                        .whatever_context("Cannot slice attention mask")?,
-                )
-                .whatever_context("Cannot build attention mask")?,
-            )
-            .whatever_context("Cannot extend attention mask")?;
-
-        let output = decoder
-            .forward_t(
-                &input
-                    .narrow(1, 7, 1)
-                    .whatever_context("Cannot slice input")?,
-                &attention_mask,
-                &mut cache,
-                None,
-                false,
-            )
-            .map_err(|e| Whatever::with_source(e, "Cannot decode input".to_string()))?;
-
-        let last_output = output.layer_outputs().last().unwrap();
-
-        assert_tensor_eq::<f32>(
-            last_output
-                .pseudo_random_reduction()
-                .whatever_context("Cannot apply reduction using random vector")?,
+        check_decoder_with_cache::<LlamaDecoder, _>(
+            "explosion-testing/llama2-kv-sharing",
+            None,
             array![[-7.3655], [-11.2087], [-1.9727]],
-            1e-4,
-        );
-
-        Ok(())
+        )
     }
 }

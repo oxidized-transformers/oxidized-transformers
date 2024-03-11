@@ -333,43 +333,25 @@ impl FromHF for AlbertEncoder {
 
 #[cfg(test)]
 mod tests {
-    use candle_core::Device;
     use ndarray::array;
-    use snafu::{report, FromString, ResultExt, Whatever};
+    use snafu::{report, ResultExt, Whatever};
 
-    use crate::architectures::{Encoder, LayerOutputs};
-    use crate::models::hf::FromHFHub;
-    use crate::util::tests::{assert_tensor_eq, sample_transformer_inputs, PseudoRandomReduction};
+    use crate::models::util::tests::check_encoder;
 
     use super::AlbertEncoder;
 
     #[test]
     #[report]
     fn albert_encoder_emits_correct_output() -> Result<(), Whatever> {
-        let encoder =
-            AlbertEncoder::from_hf_hub("explosion-testing/albert-test", None, Device::Cpu)
-                .with_whatever_context(|_| "Cannot load model")?;
-
-        let (input, mask) = sample_transformer_inputs()?;
-
-        let output = encoder
-            .forward_t(&input, &mask, None, None, false)
-            .map_err(|e| Whatever::with_source(e, "Cannot encode input".to_string()))?;
-
-        let last_output = output.layer_outputs().last().unwrap();
-
-        assert_tensor_eq::<f32>(
-            last_output
-                .pseudo_random_reduction()
-                .whatever_context("Cannot apply reduction using random vector")?,
+        check_encoder::<AlbertEncoder, _>(
+            "explosion-testing/albert-test",
+            None,
             array![
                 [0.4989, -0.3332, 3.2000, -3.6963, 0.0619, 0.1232, 2.3507, -2.1934],
                 [-3.3217, 2.9269, 3.4843, -0.7933, -3.8832, -0.7925, 1.8436, -0.9704],
                 [0.5875, 0.8119, 6.6794, 0.0263, -2.5903, 0.1582, 4.9209, 3.9640]
             ],
-            1e-4,
-        );
-
-        Ok(())
+        )
+        .whatever_context("Cannot check encoder")
     }
 }

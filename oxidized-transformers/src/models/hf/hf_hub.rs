@@ -56,7 +56,7 @@ where
     fn from_hf_hub(
         name: &str,
         revision: Option<&str>,
-        device: Device,
+        device: &Device,
     ) -> Result<Self::Model, FromHfHubError>;
 }
 
@@ -71,7 +71,7 @@ where
     fn from_hf_hub(
         name: &str,
         revision: Option<&str>,
-        device: Device,
+        device: &Device,
     ) -> Result<Self::Model, FromHfHubError> {
         let repo = HfHubRepo::new(name, revision).context(HFHubRepoSnafu)?;
         let config_file = repo.file("config.json").context(HFHubRepoSnafu)?;
