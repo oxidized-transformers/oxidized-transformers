@@ -1,10 +1,12 @@
 [package]
 name = "oxidized-transformers"
-description = "Transformers library (not functional yet)"
-version = "0.1.0"
-edition = "2021"
-license = "MIT"
-homepage = "https://github.com/danieldk/oxidized-transformers"
+description.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+version.workspace = true
+homepage.workspace = true
+
 
 [dependencies]
 candle-core = { workspace = true }
