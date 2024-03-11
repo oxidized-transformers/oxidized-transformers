@@ -22,3 +22,9 @@ rstest = { workspace = true }
 ndarray = { workspace = true, features = ["approx-0_5"] }
 rand_pcg = { workspace = true }
 rand_core = { workspace = true }
+
+[features]
+accelerate = ["candle-core/accelerate", "candle-nn/accelerate"]
+cuda = ["candle-core/cuda", "candle-nn/cuda"]
+cudnn = ["candle-core/cudnn"]
+metal = ["candle-core/metal", "candle-nn/metal"]

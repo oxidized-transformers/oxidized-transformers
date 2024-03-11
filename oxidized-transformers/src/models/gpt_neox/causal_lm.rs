@@ -47,45 +47,23 @@ impl FromHF for GPTNeoXCausalLM {
 
 #[cfg(test)]
 mod tests {
-    use candle_core::Device;
     use ndarray::array;
-    use snafu::{report, FromString, ResultExt, Whatever};
+    use snafu::{report, Whatever};
 
-    use crate::architectures::CausalLM;
-    use crate::kv_cache::KeyValueCache;
     use crate::models::gpt_neox::causal_lm::GPTNeoXCausalLM;
-    use crate::models::hf::FromHFHub;
-    use crate::util::tests::{assert_tensor_eq, sample_transformer_inputs};
+    use crate::models::util::tests::check_causal_lm;
 
     #[test]
     #[report]
     fn gptneox_causal_lm_emits_correct_output() -> Result<(), Whatever> {
-        let causal_lm = GPTNeoXCausalLM::from_hf_hub(
+        check_causal_lm::<GPTNeoXCausalLM, _>(
             "trl-internal-testing/tiny-random-GPTNeoXForCausalLM-safetensors-sharded",
             None,
-            Device::Cpu,
-        )
-        .whatever_context("Cannot load model")?;
-
-        let (input, mask) = sample_transformer_inputs()?;
-
-        let output = causal_lm
-            .forward_t(&input, &mask, &mut KeyValueCache::no_cache(), None, false)
-            .map_err(|e| Whatever::with_source(e, "Cannot decode input".to_string()))?;
-
-        let logits = output.logits();
-        let logits_max = logits.max(2).whatever_context("Cannot find max logits")?;
-
-        assert_tensor_eq::<f32>(
-            logits_max,
             array![
-                [0.3865, 0.4071, 0.3704, 0.3072, 0.3520, 0.3358, 0.3111, 0.3711],
-                [0.3771, 0.3409, 0.3430, 0.3939, 0.3990, 0.3734, 0.3794, 0.3643],
-                [0.3730, 0.3944, 0.3295, 0.3375, 0.3606, 0.4349, 0.3595, 0.3239]
+                [-1.4418, -3.5698, -1.8183, 2.8572, 0.8718, 1.2548, 1.4918, 1.5812],
+                [0.8485, 3.3328, 2.5758, 3.2619, 2.9896, 2.0168, -0.2824, -1.9384],
+                [-0.6713, -0.7587, -3.1774, -0.7306, 1.5888, 3.4785, 3.6013, 1.1660]
             ],
-            1e-4,
-        );
-
-        Ok(())
+        )
     }
 }

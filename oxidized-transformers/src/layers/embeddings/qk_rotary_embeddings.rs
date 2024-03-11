@@ -186,8 +186,8 @@ impl QueryKeyRotaryEmbeddings {
 
                 Some(
                     Tensor::arange(
-                        cache_len as i64,
-                        cache_len as i64 + seq_len as i64,
+                        cache_len as u32,
+                        cache_len as u32 + seq_len as u32,
                         query.device(),
                     )
                     .and_then(|xs| xs.repeat((batch_size, 1)))
@@ -315,6 +315,8 @@ mod tests {
             let positions = Tensor::arange_step(4i64, 0, -1, &vb.device())
                 .unwrap()
                 .reshape((1, 4))
+                .unwrap()
+                .to_dtype(DType::U32)
                 .unwrap();
             let (query_rot, key_rot) = rotary
                 .forward(

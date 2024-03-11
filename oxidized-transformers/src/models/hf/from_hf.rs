@@ -41,14 +41,15 @@ pub trait FromHF {
     fn from_hf(
         hf_config: HFConfigWithDType<Self::HFConfig>,
         backend: Box<dyn SimpleBackend>,
-        device: Device,
+        device: &Device,
     ) -> Result<Self::Model, FromHFError> {
         // Ideally we would not clone here, but TryFrom<&...> adds a lot of
         // pesky lifetime annotations everywhere.
         let config =
             Self::Config::try_from(hf_config.config().clone()).context(ConvertConfigSnafu)?;
         let rename_backend = RenamingBackend::new(backend, Self::rename_parameters());
-        let vb = VarBuilder::from_backend(Box::new(rename_backend), hf_config.dtype(), device);
+        let vb =
+            VarBuilder::from_backend(Box::new(rename_backend), hf_config.dtype(), device.clone());
         config.build(vb).context(BuildModelSnafu)
     }
 

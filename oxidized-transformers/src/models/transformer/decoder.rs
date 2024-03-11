@@ -141,6 +141,8 @@ impl Decoder for TransformerDecoder {
 
         let mut layer_output = embeddings;
         let mut layer_outputs = Vec::with_capacity(self.layers.len() + 1);
+        layer_outputs.push(layer_output.clone());
+
         for (layer_idx, layer) in self.layers.iter().enumerate() {
             let next_layer_output = layer
                 .forward_t(

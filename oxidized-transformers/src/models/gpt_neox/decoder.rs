@@ -157,115 +157,34 @@ impl FromHF for GPTNeoXDecoder {
 
 #[cfg(test)]
 mod tests {
-    use candle_core::Device;
     use ndarray::array;
-    use snafu::{report, FromString, ResultExt, Whatever};
+    use snafu::{report, ResultExt, Whatever};
 
-    use crate::architectures::{Decoder, LayerOutputs};
-    use crate::kv_cache::KeyValueCache;
-    use crate::layers::attention::AttentionMask;
     use crate::models::gpt_neox::GPTNeoXDecoder;
-    use crate::models::hf::FromHFHub;
-    use crate::util::tests::{assert_tensor_eq, sample_transformer_inputs, PseudoRandomReduction};
+    use crate::models::util::tests::{check_decoder, check_decoder_with_cache};
 
     #[test]
     #[report]
     fn gpt_neox_decoder_gives_correct_output() -> Result<(), Whatever> {
-        let decoder = GPTNeoXDecoder::from_hf_hub(
+        check_decoder::<GPTNeoXDecoder, _>(
             "trl-internal-testing/tiny-random-GPTNeoXForCausalLM-safetensors-sharded",
             None,
-            Device::Cpu,
-        )
-        .with_whatever_context(|_| "Cannot load model")?;
-
-        let (input, mask) = sample_transformer_inputs()?;
-
-        let output = decoder
-            .forward_t(&input, &mask, &mut KeyValueCache::no_cache(), None, false)
-            .map_err(|e| Whatever::with_source(e, "Cannot decode input".to_string()))?;
-
-        let last_output = output.layer_outputs().last().unwrap();
-
-        assert_tensor_eq::<f32>(
-            last_output
-                .pseudo_random_reduction()
-                .whatever_context("Cannot apply reduction using random vector")?,
             array![
                 [2.8711, 2.2852, 2.6235, 3.7102, 1.3372, 2.9834, 2.7712, 5.1699],
                 [1.0860, 5.2414, 1.7125, 1.5052, 0.8727, 3.4021, 5.8198, -0.8003],
                 [-3.6789, -1.5767, -4.2494, 0.3412, -4.3807, -3.3196, -3.2535, 0.5096]
             ],
-            1e-4,
-        );
-
-        Ok(())
+        )
+        .whatever_context("Cannot check decoder")
     }
 
     #[test]
     #[report]
     fn gpt_neox_decoder_gives_correct_output_with_cache() -> Result<(), Whatever> {
-        let decoder = GPTNeoXDecoder::from_hf_hub(
+        check_decoder_with_cache::<GPTNeoXDecoder, _>(
             "trl-internal-testing/tiny-random-GPTNeoXForCausalLM-safetensors-sharded",
             None,
-            Device::Cpu,
-        )
-        .with_whatever_context(|_| "Cannot load model")?;
-
-        let (input, mask) = sample_transformer_inputs()?;
-
-        let mut cache = KeyValueCache::cache();
-        let attention_mask = AttentionMask::new(
-            mask.bool_mask()
-                .narrow(1, 0, 7)
-                .whatever_context("Cannot slice attention mask")?,
-        )
-        .whatever_context("Cannot build attention mask")?;
-
-        let _ = decoder
-            .forward_t(
-                &input
-                    .narrow(1, 0, 7)
-                    .whatever_context("Cannot slice input")?,
-                &attention_mask,
-                &mut cache,
-                None,
-                false,
-            )
-            .map_err(|e| Whatever::with_source(e, "Cannot decode input".to_string()))?;
-
-        let attention_mask = attention_mask
-            .extend(
-                &AttentionMask::new(
-                    mask.bool_mask()
-                        .narrow(1, 7, 1)
-                        .whatever_context("Cannot slice attention mask")?,
-                )
-                .whatever_context("Cannot build attention mask")?,
-            )
-            .whatever_context("Cannot extend attention mask")?;
-
-        let output = decoder
-            .forward_t(
-                &input
-                    .narrow(1, 7, 1)
-                    .whatever_context("Cannot slice input")?,
-                &attention_mask,
-                &mut cache,
-                None,
-                false,
-            )
-            .map_err(|e| Whatever::with_source(e, "Cannot decode input".to_string()))?;
-
-        let last_output = output.layer_outputs().last().unwrap();
-
-        assert_tensor_eq::<f32>(
-            last_output
-                .pseudo_random_reduction()
-                .whatever_context("Cannot apply reduction using random vector")?,
             array![[5.1699], [-0.8003], [0.5096]],
-            1e-4,
-        );
-
-        Ok(())
+        )
     }
 }
