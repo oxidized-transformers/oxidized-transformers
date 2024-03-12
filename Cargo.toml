@@ -10,7 +10,7 @@ description = "Transformers library (not functional yet)"
 version = "0.1.0"
 edition = "2021"
 homepage = "https://github.com/oxidized-transformers/oxidized-transformers"
-license = "MIT"
+license = "MIT OR Apache-2.0"
 repository = "https://github.com/oxidized-transformers/oxidized-transformers"
 
 [workspace.dependencies]
