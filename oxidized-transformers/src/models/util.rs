@@ -1,6 +1,7 @@
 #[cfg(test)]
 pub(crate) mod tests {
-    use candle_core::{Device, Tensor};
+    use approx::Relative;
+    use candle_core::{Device, Tensor, D};
     use snafu::{ensure_whatever, FromString, ResultExt, Whatever};
 
     use crate::architectures::{CausalLM, Decoder, Encoder, LayerOutputs};
@@ -31,16 +32,37 @@ pub(crate) mod tests {
         ))
     }
 
+    /// Check a causal language model against test vectors.
+    ///
+    /// * `model_type` - The model type to construct.
+    /// * `model_name` - The name of the model to test.
+    /// * `model_revision` - The revision of the model to test.
+    /// * `test_tensor` - The expected output tensor.
+    ///   Shape: `(batch_size, sequence_length)`.
+    ///
+    /// This macro accepts the optional `epsilon` and `max_relative` arguments
+    /// for specifying the absolute and relative tolerances for the comparison.
+    macro_rules! check_causal_lm {
+        ($model_type:ty, $model_name:expr, $model_revision:expr, $test_tensor:expr $(, $opt:ident = $val:expr)*) => {
+            crate::models::util::tests::check_causal_lm_::<$model_type, _>($model_name, $model_revision, $test_tensor, approx::Relative::default()$(.$opt($val))*)
+        };
+        ($model_type:ty, $model_name:expr, $model_revision:expr, $test_tensor:expr $(, $opt:ident = $val:expr)*,) => {
+            crate::models::util::tests::check_causal_lm_::<$model_type, _>($model_name, $model_revision, $test_tensor, approx::Relative::default()$(.$opt($val))*)
+        };
+    }
+    pub(crate) use check_causal_lm;
+
     /// Check causal language model against test vectors.
     ///
     /// * `model_name` - The name of the model to test.
     /// * `model_revision` - The revision of the model to test.
     /// * `test_tensor` - The expected output tensor.
     ///   Shape: `(batch_size, sequence_length)`.
-    pub fn check_causal_lm<C, M>(
+    pub fn check_causal_lm_<C, M>(
         model_name: &str,
         model_revision: Option<&str>,
         test_tensor: impl IntoArrayD<f32>,
+        relative: Relative<f32>,
     ) -> Result<(), Whatever>
     where
         C: FromHFHub<Model = M>,
@@ -60,13 +82,26 @@ pub(crate) mod tests {
                 .forward_t(&input, &mask, &mut KeyValueCache::no_cache(), None, false)
                 .map_err(|e| Whatever::with_source(e, "Cannot decode input".to_string()))?;
 
-            assert_tensor_eq::<f32>(
-                output
-                    .logits()
+            let (batch_size, seq_len, n_class) = output
+                .logits()
+                .shape()
+                .dims3()
+                .whatever_context("Cannot get logits shape")?;
+            let logits = mask
+                .bool_mask()
+                .unsqueeze(D::Minus1)
+                .and_then(|mask| mask.to_dtype(output.logits().dtype()))
+                .and_then(|mask| mask.expand(&[batch_size, seq_len, n_class]))
+                .and_then(|mask| output.logits() * mask)
+                .whatever_context("Cannot mask out logits")?;
+
+            assert_tensor_eq!(
+                logits
                     .pseudo_random_reduction()
                     .whatever_context("Cannot apply reduction using random vector")?,
                 test_tensor.view(),
-                1e-4,
+                epsilon = relative.epsilon,
+                max_relative = relative.max_relative,
             );
         }
 
@@ -108,12 +143,12 @@ pub(crate) mod tests {
             );
             let last_output = output.layer_outputs().last().unwrap();
 
-            assert_tensor_eq::<f32>(
+            assert_tensor_eq!(
                 last_output
                     .pseudo_random_reduction()
                     .whatever_context("Cannot apply reduction using random vector")?,
                 test_tensor.view(),
-                1e-4,
+                epsilon = 1e-4,
             );
         }
 
@@ -194,12 +229,12 @@ pub(crate) mod tests {
             );
             let last_output = output.layer_outputs().last().unwrap();
 
-            assert_tensor_eq::<f32>(
+            assert_tensor_eq!(
                 last_output
                     .pseudo_random_reduction()
                     .whatever_context("Cannot apply reduction using random vector")?,
                 test_tensor.view(),
-                1e-4,
+                epsilon = 1e-4,
             );
         }
 
@@ -241,12 +276,12 @@ pub(crate) mod tests {
             );
             let last_output = output.layer_outputs().last().unwrap();
 
-            assert_tensor_eq::<f32>(
+            assert_tensor_eq!(
                 last_output
                     .pseudo_random_reduction()
                     .whatever_context("Cannot apply reduction using random vector")?,
                 test_tensor.view(),
-                1e-4,
+                epsilon = 1e-4,
             );
         }
 

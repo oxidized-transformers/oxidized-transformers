@@ -59,14 +59,32 @@ mod tests {
     #[test]
     #[report]
     fn llama_causal_lm_emits_correct_output() -> Result<(), Whatever> {
-        check_causal_lm::<LlamaCausalLM, _>(
+        check_causal_lm!(
+            LlamaCausalLM,
             "explosion-testing/llama2-kv-sharing",
             None,
             array![
-                [0.0000, -0.7422, 3.9272, 2.4643, 1.2032, -0.2746, 0.0612, 2.6404],
-                [-1.6657, -1.5350, -0.9877, 0.1828, 0.2311, 0.7174, 0.4477, -0.4943],
-                [-1.4341, -2.5877, -1.4347, -1.1339, -1.8117, -0.2561, -0.6859, -2.5824]
+                [0.0000, 0.0000, 3.9272, 0.0000, 0.0000, -0.2746, 0.0000, 0.0000],
+                [-1.6657, 0.0000, 0.0000, 0.1828, 0.0000, 0.7174, 0.4477, -0.4943],
+                [0.0000, -2.5876, -1.4347, 0.0000, 0.0000, -0.2561, -0.6859, 0.0000]
             ],
+            epsilon = 1e-4,
+        )
+    }
+
+    #[test]
+    #[report]
+    fn llama_causal_lm_emits_correct_output_float16() -> Result<(), Whatever> {
+        check_causal_lm!(
+            LlamaCausalLM,
+            "explosion-testing/llama2-kv-sharing-float16",
+            None,
+            array![
+                [0.0000, 0.0000, 3.9272, 0.0000, 0.0000, -0.2746, 0.0000, 0.0000],
+                [-1.6657, 0.0000, 0.0000, 0.1828, 0.0000, 0.7174, 0.4477, -0.4943],
+                [0.0000, -2.5876, -1.4347, 0.0000, 0.0000, -0.2561, -0.6859, 0.0000]
+            ],
+            epsilon = 1e-1
         )
     }
 }

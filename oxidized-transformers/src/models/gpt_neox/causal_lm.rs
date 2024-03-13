@@ -55,15 +55,33 @@ mod tests {
 
     #[test]
     #[report]
-    fn gptneox_causal_lm_emits_correct_output() -> Result<(), Whatever> {
-        check_causal_lm::<GPTNeoXCausalLM, _>(
+    fn gpt_neox_causal_lm_emits_correct_output() -> Result<(), Whatever> {
+        check_causal_lm!(
+            GPTNeoXCausalLM,
             "trl-internal-testing/tiny-random-GPTNeoXForCausalLM-safetensors-sharded",
             None,
             array![
-                [-1.4418, -3.5698, -1.8183, 2.8572, 0.8718, 1.2548, 1.4918, 1.5812],
-                [0.8485, 3.3328, 2.5758, 3.2619, 2.9896, 2.0168, -0.2824, -1.9384],
-                [-0.6713, -0.7587, -3.1774, -0.7306, 1.5888, 3.4785, 3.6013, 1.1660]
+                [-1.4418, 0.0000, -1.8183, 0.0000, 0.0000, 1.2548, 0.0000, 0.0000],
+                [0.8485, 0.0000, 0.0000, 3.2619, 0.0000, 2.0168, -0.2824, -1.9384],
+                [0.0000, -0.7587, -3.1774, 0.0000, 0.0000, 3.4785, 3.6013, 0.0000]
             ],
+            epsilon = 1e-4,
+        )
+    }
+
+    #[test]
+    #[report]
+    fn gpt_neox_causal_lm_emits_correct_output_float16() -> Result<(), Whatever> {
+        check_causal_lm!(
+            GPTNeoXCausalLM,
+            "explosion-testing/gpt-neox-float16",
+            None,
+            array![
+                [-1.4418, 0.0000, -1.8183, 0.0000, 0.0000, 1.2548, 0.0000, 0.0000],
+                [0.8485, 0.0000, 0.0000, 3.2619, 0.0000, 2.0168, -0.2824, -1.9384],
+                [0.0000, -0.7587, -3.1774, 0.0000, 0.0000, 3.4785, 3.6013, 0.0000]
+            ],
+            epsilon = 1e-1
         )
     }
 }

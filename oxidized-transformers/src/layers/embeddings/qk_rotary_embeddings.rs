@@ -268,7 +268,7 @@ mod tests {
                 .forward(&query, &key, &mut LayerKeyValueCache::no_cache(), None)
                 .unwrap();
 
-            assert_tensor_eq(
+            assert_tensor_eq!(
                 &query_rot,
                 array![
                     [0.0000f32, 1.0000, 2.0000, 3.0000],
@@ -278,9 +278,9 @@ mod tests {
                 ]
                 .into_shape((1, 1, 4, 4))
                 .unwrap(),
-                1e-4,
+                epsilon = 1e-4,
             );
-            assert_tensor_eq(
+            assert_tensor_eq!(
                 &key_rot,
                 array![
                     [16.0000f32, 17.0000, 18.0000, 19.0000],
@@ -290,7 +290,7 @@ mod tests {
                 ]
                 .into_shape((1, 1, 4, 4))
                 .unwrap(),
-                1e-4,
+                epsilon = 1e-4,
             );
         }
     }
@@ -327,7 +327,7 @@ mod tests {
                 )
                 .unwrap();
 
-            assert_tensor_eq(
+            assert_tensor_eq!(
                 &query_rot,
                 array![
                     [1.5136f32, 0.8792, -1.3073, 3.0376],
@@ -337,9 +337,9 @@ mod tests {
                 ]
                 .into_shape((1, 1, 4, 4))
                 .unwrap(),
-                1e-4,
+                epsilon = 1e-4,
             );
-            assert_tensor_eq(
+            assert_tensor_eq!(
                 &key_rot,
                 array![
                     [3.1641f32, 16.2266, -23.8744, 19.6646],
@@ -349,7 +349,7 @@ mod tests {
                 ]
                 .into_shape((1, 1, 4, 4))
                 .unwrap(),
-                1e-4,
+                epsilon = 1e-4,
             );
         }
     }
@@ -376,7 +376,7 @@ mod tests {
                 .forward(&query, &key, &mut LayerKeyValueCache::no_cache(), None)
                 .whatever_context("Cannot apply rotary embeddings to input with cache")?;
 
-            assert_tensor_eq(
+            assert_tensor_eq!(
                 &query_rot,
                 array![
                     [0.0000f32, 1.0000, 2.0000, 3.0000, 4.0000, 5.0000, 6.0000, 7.0000],
@@ -386,10 +386,10 @@ mod tests {
                 ]
                 .into_shape((1, 1, 4, 8))
                 .unwrap(),
-                1e-4,
+                epsilon = 1e-4,
             );
 
-            assert_tensor_eq(
+            assert_tensor_eq!(
                 &key_rot,
                 array![
                     [32.0000f32, 33.0000, 34.0000, 35.0000, 36.0000, 37.0000, 38.0000, 39.0000],
@@ -399,7 +399,7 @@ mod tests {
                 ]
                 .into_shape((1, 1, 4, 8))
                 .unwrap(),
-                1e-4,
+                epsilon = 1e-4,
             );
 
             let mut cache = LayerKeyValueCache::empty();
@@ -414,7 +414,7 @@ mod tests {
                 .forward(&query, &key, &cache, None)
                 .whatever_context("Cannot apply rotary embeddings to input with cache")?;
 
-            assert_tensor_eq(
+            assert_tensor_eq!(
                 &query_rot,
                 array![
                     [0.5758f32, 0.5093, -1.9153, 3.1210, 4.0000, 5.0000, 6.0000, 7.0000],
@@ -424,10 +424,10 @@ mod tests {
                 ]
                 .into_shape((1, 1, 4, 8))
                 .unwrap(),
-                1e-4,
+                epsilon = 1e-4,
             );
 
-            assert_tensor_eq(
+            assert_tensor_eq!(
                 &key_rot,
                 array![
                     [
@@ -446,7 +446,7 @@ mod tests {
                 ]
                 .into_shape((1, 1, 4, 8))
                 .unwrap(),
-                1e-4,
+                epsilon = 1e-4,
             );
         }
 

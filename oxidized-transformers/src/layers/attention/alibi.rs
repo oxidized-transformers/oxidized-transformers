@@ -196,19 +196,19 @@ mod tests {
             .n_attention_heads(8)
             .build()
             .unwrap();
-        assert_tensor_eq(
+        assert_tensor_eq!(
             &pow2_biases.slopes,
             array![0.5f32, 0.25, 0.125, 0.0625, 0.03125, 0.015625, 0.0078125, 0.00390625,]
                 .into_shape((1, 8, 1, 1))
                 .unwrap(),
-            1e-4,
+            epsilon = 1e-4,
         );
 
         let non_pow2_biases = AttentionLinearBiasesConfig::default()
             .n_attention_heads(12)
             .build()
             .unwrap();
-        assert_tensor_eq(
+        assert_tensor_eq!(
             &non_pow2_biases.slopes,
             array![
                 0.5f32,
@@ -226,7 +226,7 @@ mod tests {
             ]
             .into_shape((1, 12, 1, 1))
             .unwrap(),
-            1e-4,
+            epsilon = 1e-4,
         );
     }
 
@@ -239,7 +239,7 @@ mod tests {
             .is_causal(true)
             .build()
             .unwrap();
-        assert_tensor_eq(
+        assert_tensor_eq!(
             &causal
                 .forward(&Tensor::zeros((1, 4, 1, 3), DType::F32, &device).unwrap())
                 .unwrap(),
@@ -259,7 +259,7 @@ mod tests {
             ]
             .into_shape((1, 4, 1, 3))
             .unwrap(),
-            1e-4,
+            epsilon = 1e-4,
         );
 
         let inverted = AttentionLinearBiasesConfig::default()
@@ -268,7 +268,7 @@ mod tests {
             .is_inverted(true)
             .build()
             .unwrap();
-        assert_tensor_eq(
+        assert_tensor_eq!(
             &inverted
                 .forward(&Tensor::zeros((1, 4, 1, 3), DType::F32, &device).unwrap())
                 .unwrap(),
@@ -278,7 +278,7 @@ mod tests {
             ]
             .into_shape((1, 4, 1, 3))
             .unwrap(),
-            1e-4,
+            epsilon = 1e-4,
         );
     }
 
@@ -290,7 +290,7 @@ mod tests {
             .n_attention_heads(4)
             .build()
             .unwrap();
-        assert_tensor_eq(
+        assert_tensor_eq!(
             &non_causal
                 .forward(&Tensor::zeros((1, 4, 3, 3), DType::F32, &device).unwrap())
                 .unwrap(),
@@ -334,7 +334,7 @@ mod tests {
             ]
             .into_shape((1, 4, 3, 3))
             .unwrap(),
-            1e-4,
+            epsilon = 1e-4,
         );
 
         let inverted = AttentionLinearBiasesConfig::default()
@@ -342,7 +342,7 @@ mod tests {
             .is_inverted(true)
             .build()
             .unwrap();
-        assert_tensor_eq(
+        assert_tensor_eq!(
             &inverted
                 .forward(&Tensor::zeros((1, 4, 3, 3), DType::F32, &device).unwrap())
                 .unwrap(),
@@ -355,7 +355,7 @@ mod tests {
             ]
             .into_shape((1, 4, 3, 3))
             .unwrap(),
-            1e-4,
+            epsilon = 1e-4,
         );
     }
 }

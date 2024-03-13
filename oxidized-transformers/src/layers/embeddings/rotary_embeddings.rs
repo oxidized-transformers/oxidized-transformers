@@ -1,6 +1,6 @@
 use std::sync::RwLock;
 
-use candle_core::{IndexOp, Tensor};
+use candle_core::{DType, IndexOp, Tensor};
 use candle_nn::VarBuilder;
 use snafu::{ensure, ResultExt, Snafu};
 
@@ -24,8 +24,9 @@ impl RotaryEmbeddingsConfig {
         let theta =
             Tensor::from_vec(theta, (self.width / 2,), vb.device()).context(ThetaTensorSnafu)?;
 
-        let (cos, sin) = RotaryEmbeddings::create_rotary_embed(&theta, self.width, self.seq_len)
-            .context(CacheSnafu)?;
+        let (cos, sin) =
+            RotaryEmbeddings::create_rotary_embed(&theta, self.width, self.seq_len, vb.dtype())
+                .context(CacheSnafu)?;
 
         Ok(RotaryEmbeddings {
             cache: RwLock::new(RotaryEmbeddingsCache { cos, sin }),
@@ -134,6 +135,7 @@ impl RotaryEmbeddings {
         theta: &Tensor,
         width: usize,
         length: usize,
+        dtype: DType,
     ) -> Result<(Tensor, Tensor), candle_core::Error> {
         let device = theta.device();
 
@@ -145,15 +147,20 @@ impl RotaryEmbeddings {
         // is changed for compatibility with most common implementations.
         let m_theta = Tensor::cat(&[&m_theta, &m_theta], 1)?;
 
-        let re_cos = m_theta.cos()?.reshape(&[length, width])?;
-        let re_sin = m_theta.sin()?.reshape(&[length, width])?;
+        let re_cos = m_theta.cos()?.reshape(&[length, width])?.to_dtype(dtype)?;
+        let re_sin = m_theta.sin()?.reshape(&[length, width])?.to_dtype(dtype)?;
 
         Ok((re_cos, re_sin))
     }
 
-    fn resize_rotary_embed(&self, width: usize, len: usize) -> Result<(), RotaryEmbeddingsError> {
+    fn resize_rotary_embed(
+        &self,
+        width: usize,
+        len: usize,
+        dtype: DType,
+    ) -> Result<(), RotaryEmbeddingsError> {
         let (re_cos, re_sin) =
-            Self::create_rotary_embed(&self.theta, width, len).context(CacheSnafu)?;
+            Self::create_rotary_embed(&self.theta, width, len, dtype).context(CacheSnafu)?;
         let mut cache = self.cache.write().unwrap();
         cache.cos = re_cos;
         cache.sin = re_sin;
@@ -192,11 +199,12 @@ impl RotaryEmbeddings {
             expected: 4usize,
             got: input.rank(),
         })?;
+        let dtype = self.cache.read().unwrap().cos.dtype();
         let (rot_cos, rot_sin) = match positions {
             None => {
                 // Fastpath: positions from [0..seq_len), avoid indexing.
                 if self.cache.read().unwrap().seq_len()? < seq_len {
-                    self.resize_rotary_embed(width, seq_len)?;
+                    self.resize_rotary_embed(width, seq_len, dtype)?;
                 }
                 let cache = self.cache.read().unwrap();
                 let rot_cos = cache
@@ -221,7 +229,7 @@ impl RotaryEmbeddings {
                     + 1;
 
                 if self.cache.read().unwrap().seq_len()? < max_len {
-                    self.resize_rotary_embed(width, max_len)?;
+                    self.resize_rotary_embed(width, max_len, dtype)?;
                 }
 
                 let cache = self.cache.read().unwrap();

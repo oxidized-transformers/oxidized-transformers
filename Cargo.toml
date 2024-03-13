@@ -17,6 +17,7 @@ repository = "https://github.com/oxidized-transformers/oxidized-transformers"
 approx = "0.5"
 candle-core = "0.4"
 candle-nn = "0.4"
+half = "2.4"
 hf-hub = "0.3"
 ndarray = { version = "0.15.4", features = ["approx-0_5"] }
 rand_pcg = "0.3"

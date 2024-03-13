@@ -13,6 +13,7 @@ use crate::layers::embeddings::{
     QueryKeyRotaryEmbeddings, QueryKeyRotaryEmbeddingsConfig, QueryKeyRotaryEmbeddingsError,
 };
 use crate::layers::identity::Identity;
+use crate::util::tensor_ext::MinLike;
 
 /// Attention heads configuration to use in self-attention.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -564,10 +565,7 @@ impl SelfAttentionMask {
     pub fn apply_logit_mask(&self, input: &Tensor) -> Result<Tensor, SelfAttentionMaskError> {
         // Underflows to -inf for more narrow floating point types, which
         // is ok for masking.
-        let blocked_value = Tensor::try_from(f32::MIN)
-            .and_then(|xs| xs.broadcast_as(input.shape()))
-            .and_then(|xs| xs.to_device(input.device()))
-            .context(ApplyLogitsMaskSnafu)?;
+        let blocked_value = input.min_like().context(ApplyLogitsMaskSnafu)?;
         self.bool_mask
             .broadcast_as(input.shape())
             .and_then(|xs| xs.where_cond(input, &blocked_value))
