@@ -11,6 +11,7 @@ homepage.workspace = true
 [dependencies]
 candle-core = { workspace = true }
 candle-nn = { workspace = true }
+half = { workspace = true }
 hf-hub = { workspace = true }
 regex = { workspace = true }
 snafu = { workspace = true }

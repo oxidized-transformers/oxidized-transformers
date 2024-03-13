@@ -1,4 +1,4 @@
-use candle_core::{ModuleT, Tensor};
+use candle_core::{ModuleT, Tensor, D};
 use candle_nn::ops::softmax;
 use candle_nn::VarBuilder;
 use snafu::{ResultExt, Snafu};
@@ -66,11 +66,11 @@ pub enum ScaledDotProductAttentionError {
     #[snafu(display("Cannot calculate attention linear biases"))]
     AttentionLinearBiases { source: AttentionLinearBiasesError },
 
-    #[snafu(display("Cannot calculate attention scores"))]
-    AttentionScores { source: candle_core::Error },
-
     #[snafu(display("Cannot apply attention mask"))]
     AttentionMask { source: SelfAttentionMaskError },
+
+    #[snafu(display("Cannot calculate attention scores"))]
+    AttentionScores { source: candle_core::Error },
 
     #[snafu(display("Cannot weigh representations using attention mask"))]
     AttentionWeight { source: candle_core::Error },
@@ -129,7 +129,7 @@ impl AttentionScorer for ScaledDotProductAttention {
             .context(AttentionMaskSnafu)?;
 
         // Apply attention weights.
-        let attn_weights = softmax(&attn_scores, 3).context(AttentionWeightSnafu)?;
+        let attn_weights = softmax(&attn_scores, D::Minus1).context(AttentionWeightSnafu)?;
         value
             .contiguous()
             .and_then(|value| attn_weights.broadcast_matmul(&value))

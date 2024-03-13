@@ -2,13 +2,15 @@ pub mod device;
 
 pub mod renaming_backend;
 
+pub mod tensor_ext;
+
 #[cfg(test)]
 pub(crate) mod tests {
     use std::error::Error;
     use std::fmt::Debug;
 
-    use approx::{assert_abs_diff_eq, AbsDiffEq};
-    use candle_core::{Device, Tensor, WithDType, D};
+    use approx::{assert_relative_eq, AbsDiffEq, Relative, RelativeEq};
+    use candle_core::{DType, Device, Tensor, WithDType, D};
     use ndarray::{ArrayBase, ArrayD, Data, Dimension};
     use rand_core::RngCore;
     use rand_pcg::Pcg32;
@@ -50,9 +52,24 @@ pub(crate) mod tests {
         }
     }
 
-    pub(crate) fn assert_tensor_eq<T>(a: impl IntoArrayD<T>, b: impl IntoArrayD<T>, epsilon: T)
-    where
-        T: AbsDiffEq<Epsilon = T> + Clone + Debug,
+    /// Check that two tensors are equal with the given absolute (`epsilon`)
+    /// and relative (`max_relative`) tolerances.
+    macro_rules! assert_tensor_eq {
+        ($lhs:expr, $rhs:expr $(, $opt:ident = $val:expr)*) => {
+            crate::util::tests::assert_tensor_eq_($lhs, $rhs, approx::Relative::default()$(.$opt($val))*)
+        };
+        ($lhs:expr, $rhs:expr $(, $opt:ident = $val:expr)*,) => {
+            crate::util::tests::assert_tensor_eq_($lhs, $rhs, approx::Relative::default()$(.$opt($val))*)
+        };
+    }
+    pub(crate) use assert_tensor_eq;
+
+    pub(crate) fn assert_tensor_eq_<T>(
+        a: impl IntoArrayD<T>,
+        b: impl IntoArrayD<T>,
+        relative: Relative<T>,
+    ) where
+        T: AbsDiffEq<Epsilon = T> + RelativeEq + Clone + Debug,
     {
         let a = a.into_arrayd().expect("Cannot convert array");
         let b = b.into_arrayd().expect("Cannot convert array");
@@ -65,7 +82,12 @@ pub(crate) mod tests {
             b.shape()
         );
 
-        assert_abs_diff_eq!(a, b, epsilon = epsilon);
+        assert_relative_eq!(
+            a,
+            b,
+            epsilon = relative.epsilon,
+            max_relative = relative.max_relative
+        );
     }
 
     /// Generate vectors with a PRNG.
@@ -73,7 +95,8 @@ pub(crate) mod tests {
         /// Generate a vector with a PRNG.
         ///
         /// This method generates a vector with the given length. The seed of
-        /// the PRNG is set to the given length.
+        /// the PRNG is set to the given length. The returned tensor is always
+        /// a float32 tensor.
         ///
         /// * `len` - The length of the vector to generate.
         /// * `device` - The device to allocate the tensor on.
@@ -114,6 +137,9 @@ pub(crate) mod tests {
 
         #[snafu(display("Cannot reshape"))]
         Shape { source: candle_core::Error },
+
+        #[snafu(display("Cannot convert tensor to f32"))]
+        ToDType { source: candle_core::Error },
     }
 
     /// Vector reduction using pseudo-random vectors.
@@ -132,7 +158,9 @@ pub(crate) mod tests {
             let random = Tensor::pseudo_random(size, self.device())
                 .reshape((size, 1))
                 .context(ShapeSnafu)?;
-            self.broadcast_matmul(&random)
+            self.to_dtype(DType::F32)
+                .context(ToDTypeSnafu)?
+                .broadcast_matmul(&random)
                 .context(MatMulSnafu)?
                 .squeeze(D::Minus1)
                 .context(ShapeSnafu)
