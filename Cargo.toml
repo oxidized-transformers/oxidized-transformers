@@ -7,7 +7,7 @@ resolver = "2"
 
 [workspace.package]
 description = "Transformers library (not functional yet)"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2021"
 homepage = "https://github.com/oxidized-transformers/oxidized-transformers"
 license = "MIT OR Apache-2.0"
