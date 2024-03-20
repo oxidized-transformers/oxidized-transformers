@@ -3,6 +3,7 @@ pub mod error;
 pub mod kv_cache;
 pub mod layers;
 pub mod models;
+pub mod ops;
 pub mod repository;
 pub mod tokenizers;
 pub mod util;

@@ -3,6 +3,9 @@ members = [
     "oxidized-transformers",
     "oxidized-transformers-pyo3"
 ]
+exclude = [
+    "oxidized-cuda-kernels",
+]
 resolver = "2"
 
 [workspace.package]
@@ -17,9 +20,11 @@ repository = "https://github.com/oxidized-transformers/oxidized-transformers"
 approx = "0.5"
 candle-core = "0.4"
 candle-nn = "0.4"
+cudarc = { version = "0.10.0", features = ["f16"] }
 half = "2.4"
 hf-hub = "0.3"
 ndarray = { version = "0.15.4", features = ["approx-0_5"] }
+oxidized-cuda-kernels = { path = "./oxidized-cuda-kernels" }
 rand_pcg = "0.3"
 rand_core = "0.6"
 regex = "1.10"
