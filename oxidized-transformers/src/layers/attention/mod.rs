@@ -7,9 +7,7 @@ mod mask;
 pub use mask::{AttentionMask, AttentionMaskError};
 
 mod sdpa;
-pub use sdpa::{
-    ScaledDotProductAttention, ScaledDotProductAttentionConfig, ScaledDotProductAttentionError,
-};
+pub use sdpa::{with_sdpa_implementation, SDPAConfig, SDPAError, SDPAImplementation, SDPA};
 
 mod alibi;
 pub use alibi::{AttentionLinearBiases, AttentionLinearBiasesConfig, AttentionLinearBiasesError};
@@ -69,6 +67,8 @@ pub trait AttentionScorer {
     /// * `attention_mask` - Attention mask. Sequence elements for which
     ///   the corresponding mask element is set to `false` are ignored in attention.
     /// * `train` - Whether the model is trained.
+    /// * `use_causal_mask` - Whether to apply a causal mask. With a causal mask,
+    ///   a sequence element can only attend to preceding elements and itself.
     ///
     /// Returns: Attention values.
     /// *Shape:* `(batch_size, heads, seq_len, width)`
@@ -77,8 +77,9 @@ pub trait AttentionScorer {
         query: &Tensor,
         key: &Tensor,
         value: &Tensor,
-        attention_mask: &SelfAttentionMask,
+        attention_mask: &AttentionMask,
         train: bool,
+        use_causal_mask: bool,
     ) -> Result<Tensor, BoxedError>;
 }
 

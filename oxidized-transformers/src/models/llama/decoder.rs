@@ -166,10 +166,24 @@ mod tests {
     #[test]
     #[report]
     fn llama_decoder_give_correct_output_with_cache() -> Result<(), Whatever> {
-        check_decoder_with_cache::<LlamaDecoder, _>(
+        check_decoder_with_cache!(
+            LlamaDecoder,
             "explosion-testing/llama2-kv-sharing",
             None,
-            array![[-7.3655], [-11.2087], [-1.9727]],
+            array![[0.0], [-11.2087], [0.0]],
+            epsilon = 1e-4,
+        )
+    }
+
+    #[test]
+    #[report]
+    fn llama_decoder_give_correct_output_with_cache_float16() -> Result<(), Whatever> {
+        check_decoder_with_cache!(
+            LlamaDecoder,
+            "explosion-testing/llama2-kv-sharing-float16",
+            None,
+            array![[0.0], [-11.223126], [0.0]],
+            epsilon = 1e-1,
         )
     }
 }

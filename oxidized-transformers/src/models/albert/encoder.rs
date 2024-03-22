@@ -12,7 +12,7 @@ use crate::architectures::{
 use crate::error::BoxedError;
 use crate::layers::activation::Activation;
 use crate::layers::attention::{
-    AttentionHeads, AttentionMask, QkvMode, ScaledDotProductAttentionConfig, SelfAttentionConfig,
+    AttentionHeads, AttentionMask, QkvMode, SDPAConfig, SelfAttentionConfig,
 };
 use crate::layers::dropout::DropoutConfig;
 use crate::layers::feedforward::PointwiseFeedForwardConfig;
@@ -95,7 +95,7 @@ impl TryFrom<HFAlbertEncoderConfig> for AlbertEncoderConfig {
                 qkv_mode: QkvMode::Separate,
             })
             .attention_scorer(Box::new(
-                ScaledDotProductAttentionConfig::default().dropout(attention_probs_dropout),
+                SDPAConfig::default().dropout(attention_probs_dropout),
             ))
             .hidden_width(hf_config.hidden_size);
 

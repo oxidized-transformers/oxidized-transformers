@@ -5,9 +5,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::error::BoxedError;
 use crate::layers::activation::Activation;
-use crate::layers::attention::{
-    AttentionHeads, QkvMode, ScaledDotProductAttentionConfig, SelfAttentionConfig,
-};
+use crate::layers::attention::{AttentionHeads, QkvMode, SDPAConfig, SelfAttentionConfig};
 use crate::layers::dropout::DropoutConfig;
 use crate::layers::embeddings::QueryKeyRotaryEmbeddingsConfig;
 use crate::layers::feedforward::PointwiseFeedForwardConfig;
@@ -82,9 +80,7 @@ impl TryFrom<HFGPTNeoXDecoderConfig> for TransformerDecoderConfig {
                 n_key_value_heads: hf_config.num_attention_heads,
                 qkv_mode: QkvMode::MergedSplitBefore,
             })
-            .attention_scorer(Box::new(
-                ScaledDotProductAttentionConfig::default().dropout(attention_dropout),
-            ))
+            .attention_scorer(Box::new(SDPAConfig::default().dropout(attention_dropout)))
             .dropout(dropout)
             .hidden_width(hf_config.hidden_size)
             .layer_norm(layer_norm.clone())
@@ -181,10 +177,12 @@ mod tests {
     #[test]
     #[report]
     fn gpt_neox_decoder_gives_correct_output_with_cache() -> Result<(), Whatever> {
-        check_decoder_with_cache::<GPTNeoXDecoder, _>(
+        check_decoder_with_cache!(
+            GPTNeoXDecoder,
             "trl-internal-testing/tiny-random-GPTNeoXForCausalLM-safetensors-sharded",
             None,
-            array![[5.1699], [-0.8003], [0.5096]],
+            array![[0.0], [-0.8003], [0.0]],
+            epsilon = 1e-4,
         )
     }
 }

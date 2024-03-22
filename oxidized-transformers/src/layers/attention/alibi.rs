@@ -180,6 +180,14 @@ impl AttentionLinearBiases {
 
         attention_scores.add(&biases).context(ApplyBiasesSnafu)
     }
+
+    /// Get the ALiBi slopes.
+    ///
+    /// Returns: Slopes tensor.
+    /// *Shape:* `(1, heads, 1, 1)`
+    pub fn slopes(&self) -> &Tensor {
+        &self.slopes
+    }
 }
 
 #[cfg(test)]
