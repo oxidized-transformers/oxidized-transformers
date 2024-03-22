@@ -18,8 +18,9 @@ repository = "https://github.com/oxidized-transformers/oxidized-transformers"
 
 [workspace.dependencies]
 approx = "0.5"
-candle-core = "0.4"
-candle-nn = "0.4"
+candle-core = { git = "https://github.com/huggingface/candle.git", revision = "fc1fe5e" }
+candle-flash-attn = { git = "https://github.com/huggingface/candle.git", revision = "fc1fe5e" }
+candle-nn = { git = "https://github.com/huggingface/candle.git", revision = "fc1fe5e" }
 cudarc = { version = "0.10.0", features = ["f16"] }
 half = "2.4"
 hf-hub = "0.3"

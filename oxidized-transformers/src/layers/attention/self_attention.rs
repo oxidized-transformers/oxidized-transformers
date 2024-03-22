@@ -5,8 +5,8 @@ use snafu::{ensure, ResultExt, Snafu};
 use crate::error::BoxedError;
 use crate::kv_cache::LayerKeyValueCache;
 use crate::layers::attention::{
-    Attention, AttentionMask, AttentionMaskError, AttentionScorer, BuildAttention,
-    BuildAttentionScorer, ScaledDotProductAttentionConfig, ScaledDotProductAttentionError,
+    Attention, AttentionMask, AttentionScorer, BuildAttention, BuildAttentionScorer, SDPAConfig,
+    SDPAError,
 };
 use crate::layers::build_module::BuildModule;
 use crate::layers::embeddings::{
@@ -97,7 +97,7 @@ impl SelfAttentionConfig {
 
     /// Attention scorer.
     ///
-    /// Default: `ScaledDotProductAttentionConfig::default()`.
+    /// Default: `SDPAConfig::default()`.
     pub fn attention_scorer(mut self, attention_scorer: Box<dyn BuildAttentionScorer>) -> Self {
         self.attention_scorer = attention_scorer;
         self
@@ -163,7 +163,7 @@ impl Default for SelfAttentionConfig {
                 n_key_value_heads: 12,
                 qkv_mode: QkvMode::Separate,
             },
-            attention_scorer: Box::<ScaledDotProductAttentionConfig>::default(),
+            attention_scorer: Box::<SDPAConfig>::default(),
             dropout: Box::new(Identity),
             hidden_width: 768,
             layer_norm: Box::new(Identity),
@@ -266,14 +266,8 @@ impl BuildAttention for SelfAttentionConfig {
 /// Errors for self-attention.
 #[derive(Debug, Snafu)]
 pub enum SelfAttentionError {
-    #[snafu(display("Cannot create or apply attention mask"))]
-    AttentionMask { source: AttentionMaskError },
-
     #[snafu(display("Cannot apply attention scorer"))]
     AttentionScorer { source: BoxedError },
-
-    #[snafu(display("Cannot create causal mask"))]
-    CausalMask { source: CausalMaskError },
 
     #[snafu(display("Cannot build attention scorer"))]
     BuildAttentionScorer { source: BoxedError },
@@ -330,15 +324,10 @@ pub enum SelfAttentionError {
     },
 
     #[snafu(display("Cannot apply the scaled dot product attention"))]
-    ScaledDotProductAttention {
-        source: ScaledDotProductAttentionError,
-    },
+    Sdpa { source: SDPAError },
 
     #[snafu(display("Cannot construct layer"))]
     SelfAttentionConstruction { source: candle_core::Error },
-
-    #[snafu(display("Cannot update self-attention mask"))]
-    SelfAttentionMask { source: SelfAttentionMaskError },
 
     #[snafu(display("Cannot split heads"))]
     SplitHeads { source: candle_core::Error },
@@ -398,18 +387,9 @@ impl Attention for SelfAttention {
 
         // TODO: ALiBi
 
-        let mut combined_mask: SelfAttentionMask = attention_mask.into();
-        if use_causal_mask {
-            let causal_mask =
-                SelfAttentionMask::causal_mask(&query, key).context(CausalMaskSnafu)?;
-            combined_mask = combined_mask
-                .intersect(&causal_mask)
-                .context(SelfAttentionMaskSnafu)?;
-        }
-
         let attn = self
             .attention_scorer
-            .forward(&query, key, value, &combined_mask, train)
+            .forward(&query, key, value, attention_mask, train, use_causal_mask)
             .context(AttentionScorerSnafu)?
             .combine_heads()?;
 

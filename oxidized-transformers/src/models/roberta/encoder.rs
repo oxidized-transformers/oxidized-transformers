@@ -5,9 +5,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::error::BoxedError;
 use crate::layers::activation::Activation;
-use crate::layers::attention::{
-    AttentionHeads, QkvMode, ScaledDotProductAttentionConfig, SelfAttentionConfig,
-};
+use crate::layers::attention::{AttentionHeads, QkvMode, SDPAConfig, SelfAttentionConfig};
 use crate::layers::dropout::DropoutConfig;
 use crate::layers::feedforward::PointwiseFeedForwardConfig;
 use crate::layers::layer_norm::LayerNormConfig;
@@ -83,7 +81,7 @@ impl TryFrom<HFRobertaEncoderConfig> for TransformerEncoderConfig {
                 qkv_mode: QkvMode::Separate,
             })
             .attention_scorer(Box::new(
-                ScaledDotProductAttentionConfig::default().dropout(attention_probs_dropout),
+                SDPAConfig::default().dropout(attention_probs_dropout),
             ))
             .hidden_width(hf_config.hidden_size);
 

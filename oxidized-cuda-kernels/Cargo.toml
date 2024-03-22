@@ -7,7 +7,7 @@ license = "MIT or Apache-2.0"
 repository = "https://github.com/oxidized-transformers/oxidized-transformers"
 
 [dependencies]
-candle-core = { version = "0.4", features = ["cuda"] }
+candle-core = { git = "https://github.com/huggingface/candle.git", revision = "fc1fe5e" }
 cudarc = { version = "0.10", features = ["f16"] }
 half = "2.4"
 
