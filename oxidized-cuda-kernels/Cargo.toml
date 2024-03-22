@@ -3,7 +3,7 @@ name = "oxidized-cuda-kernels"
 description = "Additional CUDA kernels for Oxidized Transformers"
 version = "0.1.1"
 edition = "2021"
-license = "MIT or Apache-2.0"
+license = "MIT OR Apache-2.0"
 repository = "https://github.com/oxidized-transformers/oxidized-transformers"
 
 [dependencies]
