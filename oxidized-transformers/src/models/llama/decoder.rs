@@ -149,6 +149,7 @@ mod tests {
     use crate::models::llama::LlamaDecoder;
     use crate::models::util::tests::{check_decoder, check_decoder_with_cache};
 
+    #[test]
     #[report]
     fn llama_decoder_gives_correct_output() -> Result<(), Whatever> {
         check_decoder::<LlamaDecoder, _>(
