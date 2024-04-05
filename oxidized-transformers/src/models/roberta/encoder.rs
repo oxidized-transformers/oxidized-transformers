@@ -166,7 +166,9 @@ mod tests {
     fn roberta_encoder_emits_correct_output() -> Result<(), Whatever> {
         check_encoder::<RobertaEncoder, _>(
             "explosion-testing/roberta-test",
-            None,
+            // Revision with the PyTorch checkpoint.
+            // For testing non-Safetensor checkpoint loading.
+            Some("34a3c21d69358cd614e049116d801db94fb991d2"),
             array![
                 [0.5322, 6.6674, 7.6708, 2.6427, 0.7608, 6.1489, -0.8932, 7.3365],
                 [-0.3528, -0.2615, 5.3301, 1.5377, 0.6676, 1.2909, 7.5252, 3.0232],

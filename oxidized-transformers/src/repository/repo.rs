@@ -13,4 +13,9 @@ where
     ///
     /// Returns: The local file path.
     fn file(&self, path: impl AsRef<Path>) -> Result<Option<PathBuf>, BoxedError>;
+
+    /// Check if the path exists in the repository.
+    ///
+    /// * `path` - The path to the file within the repository.
+    fn exists(&self, path: impl AsRef<Path>) -> bool;
 }
