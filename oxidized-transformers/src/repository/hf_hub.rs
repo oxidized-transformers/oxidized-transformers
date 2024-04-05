@@ -72,4 +72,9 @@ impl Repo for HfHubRepo {
             Ok(None)
         }
     }
+
+    fn exists(&self, path: impl AsRef<Path>) -> bool {
+        let path_str = path.as_ref().to_string_lossy();
+        self.remote_path_exists(&path_str)
+    }
 }
